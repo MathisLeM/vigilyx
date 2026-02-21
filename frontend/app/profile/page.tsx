@@ -15,11 +15,15 @@ import {
   saveSlackConfig,
   deleteSlackConfig,
   testSlackWebhook,
+  listInvitations,
+  createInvitation,
+  revokeInvitation,
   TenantConfig,
   IngestionStatus,
   IngestionResult,
   SlackConfig,
   SlackAlertLevel,
+  Invitation,
 } from "@/lib/api";
 import NavSidebar from "@/components/NavSidebar";
 
@@ -68,6 +72,14 @@ export default function ProfilePage() {
   const [slackTestStatus, setSlackTestStatus] = useState<TestStatus>("idle");
   const [slackTestMessage, setSlackTestMessage] = useState<string | null>(null);
 
+  // Team / invitations
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [lastInviteToken, setLastInviteToken] = useState<string | null>(null);
+  const [revokingId, setRevokingId] = useState<number | null>(null);
+
   useEffect(() => {
     if (!isAuthenticated) { router.replace("/login"); return; }
   }, [isAuthenticated, router]);
@@ -80,6 +92,7 @@ export default function ProfilePage() {
         setSlackConfig(sc);
         if (sc.slack_alert_level) setAlertLevel(sc.slack_alert_level);
       }).catch(console.error);
+      listInvitations(tenantId).then(setInvitations).catch(console.error);
     }
   }, [isAuthenticated, tenantId]);
 
@@ -196,6 +209,44 @@ export default function ProfilePage() {
     } catch {
       setSlackTestStatus("error");
       setSlackTestMessage("Request failed");
+    }
+  }
+
+  // ---- Team / Invitation handlers ----
+
+  async function handleSendInvite(e: FormEvent) {
+    e.preventDefault();
+    if (!tenantId || !inviteEmail.trim()) return;
+    setSendingInvite(true);
+    setInviteError(null);
+    setLastInviteToken(null);
+    try {
+      const inv = await createInvitation(tenantId, inviteEmail.trim());
+      setLastInviteToken(inv.token);
+      setInviteEmail("");
+      const updated = await listInvitations(tenantId);
+      setInvitations(updated);
+    } catch (err: unknown) {
+      setInviteError(err instanceof Error ? err.message : "Failed to send invitation");
+    } finally {
+      setSendingInvite(false);
+    }
+  }
+
+  async function handleRevoke(invitationId: number) {
+    if (!tenantId) return;
+    setRevokingId(invitationId);
+    try {
+      await revokeInvitation(tenantId, invitationId);
+      setInvitations((prev) => prev.filter((i) => i.id !== invitationId));
+      if (lastInviteToken) {
+        const revokedInv = invitations.find((i) => i.id === invitationId);
+        if (revokedInv?.token === lastInviteToken) setLastInviteToken(null);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setRevokingId(null);
     }
   }
 
@@ -593,6 +644,102 @@ export default function ProfilePage() {
             <p className="text-xs text-gray-600">
               Alerts fire automatically after each detection run. The webhook URL is stored encrypted.
             </p>
+          </section>
+        )}
+
+        {/* ── Section 5: Team ── */}
+        {!isAdmin && (
+          <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
+            <h2 className="text-base font-semibold text-gray-200">Team</h2>
+            <p className="text-sm text-gray-500">
+              Invite coworkers to join your company account. They will receive a one-time link to set a password.
+            </p>
+
+            {/* Invite form */}
+            <form onSubmit={handleSendInvite} className="flex gap-3">
+              <input
+                type="email"
+                placeholder="colleague@company.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                required
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5
+                           text-sm text-white placeholder-gray-500
+                           focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+              <button
+                type="submit"
+                disabled={sendingInvite || !inviteEmail.trim()}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
+                           disabled:cursor-not-allowed text-white text-sm font-semibold
+                           rounded-lg px-4 py-2.5 transition-colors whitespace-nowrap"
+              >
+                {sendingInvite ? "Sending…" : "Send invite"}
+              </button>
+            </form>
+
+            {inviteError && (
+              <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
+                {inviteError}
+              </p>
+            )}
+
+            {/* Copyable link for the last invite */}
+            {lastInviteToken && (
+              <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 space-y-2">
+                <p className="text-xs text-gray-400 font-medium">Invite link (valid 7 days)</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs text-indigo-300 break-all font-mono">
+                    {typeof window !== "undefined"
+                      ? `${window.location.origin}/invite/accept?token=${lastInviteToken}`
+                      : `/invite/accept?token=${lastInviteToken}`}
+                  </code>
+                  <button
+                    onClick={() => {
+                      const url = `${window.location.origin}/invite/accept?token=${lastInviteToken}`;
+                      navigator.clipboard.writeText(url);
+                    }}
+                    className="shrink-0 text-xs text-gray-400 hover:text-white border border-gray-700
+                               hover:border-gray-500 rounded px-2 py-1 transition-colors"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Pending invitations list */}
+            {invitations.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pending invitations</p>
+                {invitations.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="flex items-center justify-between bg-gray-800 border border-gray-700
+                               rounded-lg px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm text-white truncate">{inv.email}</p>
+                      <p className="text-xs text-gray-500">
+                        Expires {format(parseISO(inv.expires_at), "MMM d, yyyy")}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRevoke(inv.id)}
+                      disabled={revokingId === inv.id}
+                      className="shrink-0 ml-4 text-xs text-red-400 hover:text-red-300
+                                 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {revokingId === inv.id ? "Revoking…" : "Revoke"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {invitations.length === 0 && (
+              <p className="text-xs text-gray-600">No pending invitations.</p>
+            )}
           </section>
         )}
       </main>

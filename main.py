@@ -9,7 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from app.config import _WEAK_SECRET, settings
 from app.database import init_db
 from app.limiter import limiter
-from app.routers import alerts, auth, config, ingestion, metrics, tenants
+from app.routers import alerts, auth, config, ingestion, invitations, metrics, tenants
 from app.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -74,11 +74,12 @@ app.add_middleware(
 )
 
 # Routers
-app.include_router(auth.router,      prefix="/auth",      tags=["Auth"])
-app.include_router(tenants.router,   prefix="/tenants",   tags=["Tenants"])
-app.include_router(alerts.router,    prefix="/alerts",    tags=["Alerts"])
-app.include_router(config.router,    prefix="/config",    tags=["Config"])
-app.include_router(metrics.router,   prefix="/metrics",   tags=["Metrics"])
+app.include_router(auth.router,        prefix="/auth",        tags=["Auth"])
+app.include_router(tenants.router,     prefix="/tenants",     tags=["Tenants"])
+app.include_router(alerts.router,      prefix="/alerts",      tags=["Alerts"])
+app.include_router(config.router,      prefix="/config",      tags=["Config"])
+app.include_router(metrics.router,     prefix="/metrics",     tags=["Metrics"])
+app.include_router(invitations.router, prefix="/invitations", tags=["Invitations"])
 app.include_router(ingestion.router, prefix="/ingestion", tags=["Ingestion"])
 
 

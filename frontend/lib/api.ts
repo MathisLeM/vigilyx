@@ -268,3 +268,71 @@ export function deleteSlackConfig(tenantId: number): Promise<SlackConfig> {
 export function testSlackWebhook(tenantId: number): Promise<TestResult> {
   return request<TestResult>(`/config/${tenantId}/test-slack`, { method: "POST" });
 }
+
+// -- Invitations -----------------------------------------------------------
+
+export interface Invitation {
+  id: number;
+  tenant_id: number;
+  email: string;
+  role: string;
+  token: string;
+  created_at: string;
+  expires_at: string;
+  accepted_at: string | null;
+}
+
+export interface AcceptTokenInfo {
+  valid: boolean;
+  email: string;
+  tenant_name: string;
+  expired: boolean;
+  already_accepted: boolean;
+}
+
+export interface AcceptOut {
+  access_token: string;
+  token_type: string;
+  tenant_id: number;
+  email: string;
+  is_admin: boolean;
+}
+
+export function listInvitations(tenantId: number): Promise<Invitation[]> {
+  return request<Invitation[]>(`/invitations/${tenantId}`);
+}
+
+export function createInvitation(tenantId: number, email: string): Promise<Invitation> {
+  return request<Invitation>(`/invitations/${tenantId}`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function revokeInvitation(tenantId: number, invitationId: number): Promise<void> {
+  return request<void>(`/invitations/${tenantId}/${invitationId}`, { method: "DELETE" });
+}
+
+export function validateInviteToken(token: string): Promise<AcceptTokenInfo> {
+  const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  return fetch(`${API}/invitations/accept?token=${encodeURIComponent(token)}`)
+    .then((r) => {
+      if (!r.ok) throw new Error("Invalid invitation");
+      return r.json();
+    });
+}
+
+export function acceptInvitation(token: string, password: string): Promise<AcceptOut> {
+  const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  return fetch(`${API}/invitations/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  }).then(async (r) => {
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ detail: r.statusText }));
+      throw new Error(err.detail ?? "Registration failed");
+    }
+    return r.json();
+  });
+}
