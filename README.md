@@ -111,15 +111,37 @@ The scheduler also runs ingestion and detection automatically every 24 hours.
 
 ## Roadmap
 
-- [ ] PostgreSQL migration
-- [ ] Stripe API key encryption at rest
-- [ ] Email / Slack webhook alerting on HIGH severity
-- [ ] Data science models (isolation forest, LSTM forecasting)
-- [ ] Multi-currency support
-- [ ] CSV export
+**Production hardening**
+- [ ] PostgreSQL migration + Alembic migrations
+- [ ] Stripe API key encryption at rest (Fernet)
+- [ ] Email / Slack webhook alerting on HIGH severity alerts
+- [ ] CORS + SECRET_KEY locked down for production domain
+
+**ML model layer** *(hosted inline in FastAPI — requires ≥ 1 GB RAM server)*
+- [ ] Isolation Forest detector — unsupervised anomaly scoring per metric, replaces/augments MAD+Z-score
+- [ ] Per-tenant model training pipeline — scheduled via APScheduler after ingestion
+- [ ] LSTM forecasting — predict next-day metric values, alert when actual deviates from forecast
+- [ ] Model artifact storage — serialized models (.pkl / .pt) persisted to S3/R2 or local volume
+- [ ] Model versioning — track which model version produced each alert
+
+**Platform**
+- [ ] Multi-currency support (EUR, GBP normalisation)
+- [ ] CSV / PDF export of alerts and KPI snapshots
+- [ ] Tenant self-registration flow (no manual DB seeding)
+- [ ] Admin dashboard: cross-tenant anomaly overview
+
+## Infrastructure (production)
+
+| Component | Recommended service | Notes |
+|-----------|-------------------|-------|
+| Backend + ML model | Hetzner CX21 (€4/mo) or Railway Pro | Needs ≥ 1 GB RAM for model inference |
+| Frontend | Vercel | Free tier, auto-deploy from GitHub |
+| Database | Neon / Supabase (PostgreSQL) | Free tier sufficient to start |
+| Model artifacts | Cloudflare R2 or S3 | Downloaded at server startup |
 
 ## Tech Stack
 
-**Backend**: FastAPI · SQLAlchemy · APScheduler · pandas · stripe-python · python-jose
+**Backend**: FastAPI · SQLAlchemy · Alembic · APScheduler · pandas · scikit-learn · stripe-python · python-jose
 **Frontend**: Next.js 14 · Tailwind CSS · Recharts · date-fns
 **Database**: SQLite (local) → PostgreSQL (production)
+**ML**: scikit-learn (Isolation Forest) · PyTorch (LSTM) — served inline in FastAPI
