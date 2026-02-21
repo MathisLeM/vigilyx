@@ -52,8 +52,9 @@ from simulation.stripe_simulator import SCENARIOS, StripeSimulator
 # -- Demo configuration --------------------------------------------------------
 
 DEMO_USERS = {
-    "acme":   {"email": "acme@demo.com",   "password": "demo1234"},
-    "globex": {"email": "globex@demo.com", "password": "demo1234"},
+    "acme":    {"email": "acme@demo.com",    "password": "demo1234"},
+    "globex":  {"email": "globex@demo.com",  "password": "demo1234"},
+    "apex":    {"email": "apex@demo.com",    "password": "demo1234"},
 }
 
 TENANT_CONFIGS = [
@@ -71,6 +72,14 @@ TENANT_CONFIGS = [
         "stripe_account_id": "acct_globex_demo_001",
         "simulator_profile": "ecommerce",
         "simulator_seed": 7,
+        "simulation_days": 90,
+    },
+    {
+        "name": "Apex Consulting",
+        "slug": "apex",
+        "stripe_account_id": "acct_apex_demo_001",
+        "simulator_profile": "high_ticket_b2b",
+        "simulator_seed": 13,
         "simulation_days": 90,
     },
 ]
@@ -483,8 +492,9 @@ def main():
         print("    cd frontend && npm run dev")
         print()
         print("  Demo credentials:")
-        print("    acme@demo.com    / demo1234   (Acme SaaS)")
-        print("    globex@demo.com  / demo1234   (Globex Commerce)")
+        print("    acme@demo.com    / demo1234   (Acme SaaS — saas_stable)")
+        print("    globex@demo.com  / demo1234   (Globex Commerce — ecommerce)")
+        print("    apex@demo.com    / demo1234   (Apex Consulting — high_ticket_b2b)")
         print("    admin@demo.com   / admin1234  (Admin)")
         print(f"{'='*60}\n")
 

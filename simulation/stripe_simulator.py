@@ -145,6 +145,23 @@ PROFILES: dict[str, BusinessProfile] = {
         monthly_growth=0.08,
         currency="usd",
     ),
+    "high_ticket_b2b": BusinessProfile(
+        name="High-Ticket B2B",
+        daily_charges_mean=12,
+        daily_charges_std=0.35,
+        avg_charge_cents=450_000,       # $4,500 ATV
+        charge_value_std=0.85,          # wide range: $500 – $50k
+        stripe_pct_fee=0.029,
+        stripe_fixed_fee=30,
+        refund_rate=0.005,
+        refund_delay_days=(1, 30),
+        dispute_rate=0.001,
+        dispute_delay_days=(14, 90),
+        payout_interval_days=2,
+        weekend_factor=0.05,            # almost no B2B on weekends
+        monthly_growth=0.05,
+        currency="usd",
+    ),
 }
 
 
@@ -210,6 +227,17 @@ SCENARIOS: dict[str, list[AnomalyScenario]] = {
                         label="viral_spike"),
         AnomalyScenario(day_offset=60, category="dispute", multiplier=9.0,
                         label="dispute_wave"),
+    ],
+    "high_ticket_b2b": [
+        AnomalyScenario(day_offset=8,  category="charge",  multiplier=0.0,
+                        label="complete_outage_day"),
+        AnomalyScenario(day_offset=20, category="charge",  multiplier=1.0,
+                        value_multiplier=5.0,
+                        label="enterprise_deal_spike"),
+        AnomalyScenario(day_offset=45, category="refund",  multiplier=8.0,
+                        label="contract_cancellation_wave"),
+        AnomalyScenario(day_offset=70, category="dispute", multiplier=10.0,
+                        label="chargeback_burst"),
     ],
 }
 
