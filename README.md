@@ -112,10 +112,14 @@ The scheduler also runs ingestion and detection automatically every 24 hours.
 ## Roadmap
 
 **Production hardening**
-- [ ] PostgreSQL migration + Alembic migrations
-- [ ] Stripe API key encryption at rest (Fernet)
-- [ ] Email / Slack webhook alerting on HIGH severity alerts
-- [ ] CORS + SECRET_KEY locked down for production domain
+- [x] PostgreSQL migration + Alembic migrations
+- [x] Stripe API key encryption at rest (Fernet)
+- [x] Slack webhook alerting — configurable severity filter (HIGH / Med+High / All)
+- [x] CORS + SECRET_KEY locked down for production domain
+- [x] Rate limiting on login (brute-force protection)
+- [x] API docs disabled in production
+- [ ] Email alerting
+- [ ] Deploy (Neon + EC2 + Vercel)
 
 **ML model layer** *(hosted inline in FastAPI — requires ≥ 1 GB RAM server)*
 - [ ] Isolation Forest detector — unsupervised anomaly scoring per metric, replaces/augments MAD+Z-score
