@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_WEAK_SECRET = "changeme-use-a-long-random-string-in-production"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -8,12 +10,21 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # -- Environment -----------------------------------------------------------
+    # Set to "production" to enable strict security checks at startup.
+    ENVIRONMENT: str = "development"
+
     # -- Database --------------------------------------------------------------
     DATABASE_URL: str = "sqlite:///./vigilyx.db"
 
     # -- API server ------------------------------------------------------------
     API_HOST: str = "127.0.0.1"
     API_PORT: int = 8000
+
+    # -- CORS ------------------------------------------------------------------
+    # Comma-separated list of allowed origins.
+    # Example: ALLOWED_ORIGINS=https://app.vigilyx.com
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # -- Scheduler -------------------------------------------------------------
     SCHEDULER_INTERVAL_HOURS: int = 24
@@ -24,20 +35,26 @@ class Settings(BaseSettings):
     ROLLING_WINDOW_DAYS: int = 30
 
     # -- Auth ------------------------------------------------------------------
-    SECRET_KEY: str = "changeme-use-a-long-random-string-in-production"
+    # Generate: python -c "import secrets; print(secrets.token_hex(32))"
+    SECRET_KEY: str = _WEAK_SECRET
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8  # 8 hours
 
     # -- Encryption ------------------------------------------------------------
-    # Fernet key for encrypting Stripe API keys at rest.
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     FERNET_KEY: str = ""
 
     # -- Ingestion -------------------------------------------------------------
-    # How many days back to pull from Stripe on first-time ingestion
     INGESTION_LOOKBACK_DAYS: int = 90
-    # Base currency for cross-currency aggregation
     BASE_CURRENCY: str = "usd"
+
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT == "production"
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
 
 settings = Settings()

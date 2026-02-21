@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
+from app.limiter import limiter
 from app.models.user import User
 
 router = APIRouter()
@@ -107,7 +108,9 @@ class TokenOut(BaseModel):
 
 
 @router.post("/login", response_model=TokenOut)
+@limiter.limit("10/minute")
 def login(
+    request: Request,  # required by slowapi
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
