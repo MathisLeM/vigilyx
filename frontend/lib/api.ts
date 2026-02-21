@@ -292,6 +292,44 @@ export function fetchIngestionStatus(tenantId: number): Promise<IngestionStatus[
   return request<IngestionStatus[]>(`/ingestion/${tenantId}/status`);
 }
 
+// ── AI Model ───────────────────────────────────────────────────────────────────
+
+export interface ModelStatus {
+  connection_id: number;
+  connection_name: string;
+  stripe_account_id: string | null;
+  days_available: number;
+  first_date: string | null;
+  last_date: string | null;
+  has_enough_data: boolean;
+  has_model: boolean;
+  trained_at: string | null;
+  model_type: "custom" | "base";
+}
+
+export interface TrainResult {
+  status: "trained" | "not_enough_data";
+  days_available: number;
+  first_date: string | null;
+  last_date: string | null;
+  trained_at: string | null;
+  model_path: string | null;
+}
+
+export function fetchModelStatus(tenantId: number): Promise<ModelStatus[]> {
+  return request<ModelStatus[]>(`/ingestion/${tenantId}/model-status`);
+}
+
+export function trainAccountModel(
+  tenantId: number,
+  connectionId: number
+): Promise<TrainResult> {
+  return request<TrainResult>(
+    `/ingestion/${tenantId}/train?connection_id=${connectionId}`,
+    { method: "POST" }
+  );
+}
+
 // -- Slack Webhooks --------------------------------------------------------
 
 export type SlackAlertLevel = "HIGH" | "MEDIUM_AND_HIGH" | "ALL";

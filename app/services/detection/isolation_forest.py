@@ -10,12 +10,12 @@ Role (gating only — does NOT create new alerts):
 
 Activation conditions:
   - Tenant must have >= MIN_DAYS_HISTORY days in the context window
-  - The model file must exist (base or tenant-specific)
+  - The model file must exist (account-specific or base)
   - If either condition fails: all anomalies pass through unchanged (fail-safe)
 
-Model resolution order:
-  1. models/tenant_{tenant_id}.pkl  — per-tenant model (trained by scheduler after 30 days)
-  2. models/base_isolation_forest.pkl — pre-trained base model (ships with codebase)
+Model resolution order (keyed by stripe_account_id):
+  1. models/account_{stripe_account_id}.pkl — per-account model (trained after 30 days)
+  2. models/base_isolation_forest.pkl        — pre-trained base model (ships with codebase)
   3. None — skip gating, log a warning
 
 Feature vector (6 features, same as training):
@@ -45,34 +45,35 @@ ROLLING_WINDOW   = 14   # days used to compute rolling z-scores
 
 # ── Model cache (loaded once per process) ─────────────────────────────────────
 
-_base_clf   = None   # base IsolationForest, shared across tenants
-_tenant_clf: dict[int, object] = {}   # per-tenant models, keyed by tenant_id
+_base_clf = None                          # base IsolationForest, shared fallback
+_account_clf: dict[str, object] = {}     # per-account models, keyed by stripe_account_id
 
 
-def _load_model(tenant_id: int):
+def _load_model(stripe_account_id: Optional[str]):
     """
-    Return the best available IsolationForest for this tenant.
+    Return the best available IsolationForest for this Stripe account.
     Results are cached in module-level variables after the first load.
     Returns None if no model file is found.
     """
     global _base_clf
 
-    # Try tenant-specific model first
-    if tenant_id not in _tenant_clf:
-        path = os.path.join(MODEL_DIR, f"tenant_{tenant_id}.pkl")
-        if os.path.exists(path):
-            try:
-                import joblib
-                _tenant_clf[tenant_id] = joblib.load(path)
-                logger.info("IF: loaded tenant model for tenant_id=%d", tenant_id)
-            except Exception as exc:
-                logger.warning("IF: failed to load tenant model %s: %s", path, exc)
-                _tenant_clf[tenant_id] = None
-        else:
-            _tenant_clf[tenant_id] = None   # cache miss — don't re-check on every call
+    if stripe_account_id:
+        # Try account-specific model first
+        if stripe_account_id not in _account_clf:
+            path = os.path.join(MODEL_DIR, f"account_{stripe_account_id}.pkl")
+            if os.path.exists(path):
+                try:
+                    import joblib
+                    _account_clf[stripe_account_id] = joblib.load(path)
+                    logger.info("IF: loaded account model for %s", stripe_account_id)
+                except Exception as exc:
+                    logger.warning("IF: failed to load account model %s: %s", path, exc)
+                    _account_clf[stripe_account_id] = None
+            else:
+                _account_clf[stripe_account_id] = None  # cache miss
 
-    if _tenant_clf.get(tenant_id) is not None:
-        return _tenant_clf[tenant_id]
+        if _account_clf.get(stripe_account_id) is not None:
+            return _account_clf[stripe_account_id]
 
     # Fall back to base model
     if _base_clf is None:
@@ -89,12 +90,13 @@ def _load_model(tenant_id: int):
     return _base_clf   # may be None if no model available
 
 
-def invalidate_tenant_cache(tenant_id: int) -> None:
+def invalidate_cache(stripe_account_id: str) -> None:
     """
-    Clear the cached model for a tenant so the next call reloads from disk.
-    Called by the scheduler after per-tenant retraining completes.
+    Clear the cached model for a Stripe account so the next call reloads from disk.
+    Called by account_trainer after per-account retraining completes.
     """
-    _tenant_clf.pop(tenant_id, None)
+    _account_clf.pop(stripe_account_id, None)
+    logger.debug("IF: cache invalidated for account %s", stripe_account_id)
 
 
 # ── Feature computation ────────────────────────────────────────────────────────
@@ -200,14 +202,16 @@ def apply_if_gating(
     anomalies: list[dict],
     df: pd.DataFrame,
     tenant_id: int,
+    stripe_account_id: Optional[str] = None,
 ) -> list[dict]:
     """
     Apply IF gating to a list of raw anomaly dicts.
 
     Args:
-        anomalies:  output of _run_detectors(), filtered to detection window
-        df:         full context DataFrame (same one used for detection)
-        tenant_id:  used to resolve the correct model
+        anomalies:          output of _run_detectors(), filtered to detection window
+        df:                 full context DataFrame (same one used for detection)
+        tenant_id:          for logging only
+        stripe_account_id:  used to resolve the correct account model
 
     Returns:
         Modified list of anomaly dicts:
@@ -218,9 +222,12 @@ def apply_if_gating(
     if not anomalies:
         return anomalies
 
-    clf = _load_model(tenant_id)
+    clf = _load_model(stripe_account_id)
     if clf is None:
-        logger.debug("IF: no model available for tenant %d — gating skipped", tenant_id)
+        logger.debug(
+            "IF: no model available for tenant=%d account=%s — gating skipped",
+            tenant_id, stripe_account_id,
+        )
         return anomalies
 
     # Check minimum history for the earliest detection date
@@ -230,8 +237,8 @@ def apply_if_gating(
     prior_rows = len(df[df.index < earliest_ts])
     if prior_rows < MIN_DAYS_HISTORY:
         logger.debug(
-            "IF: tenant %d has %d prior rows (need %d) — gating skipped",
-            tenant_id, prior_rows, MIN_DAYS_HISTORY,
+            "IF: tenant=%d account=%s has %d prior rows (need %d) — gating skipped",
+            tenant_id, stripe_account_id, prior_rows, MIN_DAYS_HISTORY,
         )
         return anomalies
 
@@ -256,13 +263,11 @@ def apply_if_gating(
 
         if score >= 0:
             # IF considers this day normal — suppress LOW alerts only
-            # HIGH alerts always pass through
             sev = _preliminary_severity(anomaly)
             if sev == "LOW":
                 suppressed += 1
-                continue   # drop this anomaly
+                continue
             result.append(anomaly)
-
         else:
             # IF considers this day anomalous — keep and optionally boost
             boosted_anomaly = dict(anomaly)
@@ -274,8 +279,8 @@ def apply_if_gating(
 
     if suppressed or boosted:
         logger.info(
-            "IF gating (tenant %d): suppressed=%d LOW alerts, boosted=%d MEDIUM->HIGH",
-            tenant_id, suppressed, boosted,
+            "IF gating (tenant=%d account=%s): suppressed=%d LOW, boosted=%d MEDIUM→HIGH",
+            tenant_id, stripe_account_id, suppressed, boosted,
         )
 
     return result

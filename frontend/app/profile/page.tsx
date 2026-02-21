@@ -11,6 +11,8 @@ import {
   testStripeConnection,
   fetchIngestionStatus,
   runIngestion,
+  fetchModelStatus,
+  trainAccountModel,
   fetchSlackConfig,
   saveSlackConfig,
   deleteSlackConfig,
@@ -21,6 +23,8 @@ import {
   StripeConnection,
   IngestionStatus,
   IngestionResult,
+  ModelStatus,
+  TrainResult,
   TestResult,
   SlackConfig,
   SlackAlertLevel,
@@ -65,6 +69,12 @@ export default function ProfilePage() {
   const [ingestResults, setIngestResults] = useState<Record<number, IngestionResult>>({});
   const [ingestErrors, setIngestErrors] = useState<Record<number, string>>({});
 
+  // ── AI Model ──────────────────────────────────────────────────────────────
+  const [modelStatuses, setModelStatuses] = useState<ModelStatus[]>([]);
+  const [trainingId, setTrainingId] = useState<number | null>(null);
+  const [trainResults, setTrainResults] = useState<Record<number, TrainResult>>({});
+  const [trainErrors, setTrainErrors] = useState<Record<number, string>>({});
+
   // ── Slack ──────────────────────────────────────────────────────────────────
   const [slackConfig, setSlackConfig] = useState<SlackConfig | null>(null);
   const [webhookInput, setWebhookInput] = useState("");
@@ -91,6 +101,7 @@ export default function ProfilePage() {
     if (!isAuthenticated || !tenantId) return;
     listStripeConnections(tenantId).then(setConnections).catch(console.error);
     fetchIngestionStatus(tenantId).then(setIngestionStatuses).catch(console.error);
+    fetchModelStatus(tenantId).then(setModelStatuses).catch(console.error);
     fetchSlackConfig(tenantId).then((sc) => {
       setSlackConfig(sc);
       if (sc.slack_alert_level) setAlertLevel(sc.slack_alert_level);
@@ -168,6 +179,28 @@ export default function ProfilePage() {
       }));
     } finally {
       setIngestingId(null);
+    }
+  }
+
+  // ── AI Model handlers ──────────────────────────────────────────────────────
+
+  async function handleTrain(connId: number) {
+    if (!tenantId) return;
+    setTrainingId(connId);
+    setTrainErrors((prev) => { const r = { ...prev }; delete r[connId]; return r; });
+    try {
+      const result = await trainAccountModel(tenantId, connId);
+      setTrainResults((prev) => ({ ...prev, [connId]: result }));
+      // Refresh model statuses to reflect new trained_at / has_model
+      const updated = await fetchModelStatus(tenantId);
+      setModelStatuses(updated);
+    } catch (err: unknown) {
+      setTrainErrors((prev) => ({
+        ...prev,
+        [connId]: err instanceof Error ? err.message : "Training failed",
+      }));
+    } finally {
+      setTrainingId(null);
     }
   }
 
@@ -700,7 +733,156 @@ export default function ProfilePage() {
           </section>
         )}
 
-        {/* ── Section 5: Team ── */}
+        {/* ── Section 5: AI Model ── */}
+        {!isAdmin && (
+          <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
+            <div>
+              <h2 className="text-base font-semibold text-gray-200">AI Model</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Train a personalized Isolation Forest per Stripe account. Requires 30+ days of ingested data.
+                The scheduler retrains automatically every night at 03:00 UTC.
+              </p>
+            </div>
+
+            {connections.length === 0 && (
+              <p className="text-sm text-gray-600">
+                Add and test a Stripe connection to enable AI model training.
+              </p>
+            )}
+
+            {modelStatuses.map((ms) => {
+              const isTraining = trainingId === ms.connection_id;
+              const result = trainResults[ms.connection_id];
+              const error = trainErrors[ms.connection_id];
+              const canTrain = ms.has_enough_data && !!ms.stripe_account_id;
+
+              return (
+                <div
+                  key={ms.connection_id}
+                  className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-4"
+                >
+                  {/* Header */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{ms.connection_name}</p>
+                      {ms.stripe_account_id && (
+                        <p className="text-xs font-mono text-gray-500">{ms.stripe_account_id}</p>
+                      )}
+                    </div>
+                    {/* Model type badge */}
+                    <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                      ms.has_model
+                        ? "bg-indigo-950 text-indigo-300 border-indigo-700"
+                        : "bg-gray-700 text-gray-400 border-gray-600"
+                    }`}>
+                      {ms.has_model ? "Custom model" : "Base model"}
+                    </span>
+                  </div>
+
+                  {/* Data availability */}
+                  {ms.stripe_account_id ? (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                        Data available
+                      </p>
+                      <div className="grid grid-cols-[140px_1fr] gap-y-1 text-xs">
+                        <span className="text-gray-500">Daily snapshots</span>
+                        <span className="text-gray-300 font-mono">{ms.days_available}</span>
+                        <span className="text-gray-500">Date range</span>
+                        <span className="text-gray-300">
+                          {ms.first_date && ms.last_date
+                            ? `${ms.first_date} → ${ms.last_date}`
+                            : <span className="text-gray-600">No data yet</span>}
+                        </span>
+                        <span className="text-gray-500">Threshold</span>
+                        <span className={ms.has_enough_data ? "text-emerald-400" : "text-amber-400"}>
+                          {ms.has_enough_data
+                            ? `✓ Ready (${ms.days_available}/30 days)`
+                            : `✗ Need more data (${ms.days_available}/30 days)`}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-600">
+                      Test this connection first to discover the Stripe account ID.
+                    </p>
+                  )}
+
+                  {/* Model info */}
+                  {ms.has_model && ms.trained_at && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                        Model
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        Trained {format(parseISO(ms.trained_at), "MMM d, yyyy 'at' HH:mm")}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Train / Retrain result */}
+                  {result && (
+                    <div className={`rounded-lg px-3 py-2 text-xs space-y-1 ${
+                      result.status === "trained"
+                        ? "bg-indigo-950 border border-indigo-800"
+                        : "bg-amber-950 border border-amber-800"
+                    }`}>
+                      {result.status === "trained" ? (
+                        <>
+                          <p className="text-indigo-300 font-semibold">Model trained successfully</p>
+                          {result.trained_at && (
+                            <p className="text-gray-400">
+                              {format(parseISO(result.trained_at), "MMM d, yyyy 'at' HH:mm")}
+                              {" · "}{result.days_available} day{result.days_available !== 1 ? "s" : ""} of data
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-amber-300">
+                          Not enough data — {result.days_available}/30 days available
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {error && (
+                    <p className="text-xs text-red-400 bg-red-950 border border-red-800 rounded-lg px-3 py-2">
+                      {error}
+                    </p>
+                  )}
+
+                  {/* Train / Retrain button */}
+                  <button
+                    onClick={() => handleTrain(ms.connection_id)}
+                    disabled={isTraining || !canTrain}
+                    title={!ms.stripe_account_id
+                      ? "Test connection first"
+                      : !ms.has_enough_data
+                      ? `Need ${30 - ms.days_available} more days of data`
+                      : undefined}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40
+                               disabled:cursor-not-allowed text-white text-sm font-semibold
+                               rounded-lg px-4 py-2.5 transition-colors"
+                  >
+                    {isTraining
+                      ? "Training…"
+                      : ms.has_model
+                      ? "Retrain model"
+                      : "Train model"}
+                  </button>
+                </div>
+              );
+            })}
+
+            <p className="text-xs text-gray-600">
+              The custom model learns your account's specific patterns (seasonality, volume, fee profile)
+              and replaces the generic base model for anomaly detection on this account.
+            </p>
+          </section>
+        )}
+
+        {/* ── Section 6: Team ── */}
+        {/* (was Section 5 before AI Model section was added) */}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
             <h2 className="text-base font-semibold text-gray-200">Team</h2>

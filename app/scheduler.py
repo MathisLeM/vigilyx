@@ -1,6 +1,7 @@
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
@@ -144,6 +145,55 @@ def _ingestion_job():
         db.close()
 
 
+# ── Retraining job ────────────────────────────────────────────────────────────
+
+def _retraining_job():
+    """
+    Nightly job: retrain per-account Isolation Forest models for all
+    Stripe connections that have >= 30 days of daily_revenue_metrics data.
+    Runs at 03:00 UTC daily so fresh ingested data is available.
+    """
+    from app.database import SessionLocal
+    from app.models.stripe_connection import StripeConnection
+    from app.models.tenant import Tenant
+    from app.services.detection.account_trainer import train_account_model
+
+    db = SessionLocal()
+    try:
+        tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
+        for tenant in tenants:
+            connections = (
+                db.query(StripeConnection)
+                .filter(
+                    StripeConnection.tenant_id == tenant.id,
+                    StripeConnection.stripe_account_id.isnot(None),
+                )
+                .all()
+            )
+            for conn in connections:
+                try:
+                    meta = train_account_model(db, tenant.id, conn.stripe_account_id)
+                    if meta:
+                        logger.info(
+                            "Scheduler retraining — tenant %s conn '%s': "
+                            "trained on %d feature rows",
+                            tenant.id, conn.name, meta.get("feature_rows", 0),
+                        )
+                    else:
+                        logger.debug(
+                            "Scheduler retraining — tenant %s conn '%s': "
+                            "not enough data, skipped",
+                            tenant.id, conn.name,
+                        )
+                except Exception as exc:
+                    logger.exception(
+                        "Scheduler retraining — tenant %s conn '%s': error: %s",
+                        tenant.id, conn.name, exc,
+                    )
+    finally:
+        db.close()
+
+
 # ── Scheduler lifecycle ───────────────────────────────────────────────────────
 
 def start_scheduler():
@@ -165,9 +215,18 @@ def start_scheduler():
         max_instances=1,
     )
 
+    # Retraining: nightly at 03:00 UTC for accounts with 30+ days of data
+    _scheduler.add_job(
+        _retraining_job,
+        trigger=CronTrigger(hour=3, minute=0),
+        id="model_retraining",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     _scheduler.start()
     logger.info(
-        "Scheduler started — ingestion every 1h, detection every %dh",
+        "Scheduler started — ingestion every 1h, detection every %dh, retraining daily at 03:00 UTC",
         settings.SCHEDULER_INTERVAL_HOURS,
     )
 

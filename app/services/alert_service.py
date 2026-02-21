@@ -620,7 +620,7 @@ def run_detection_pipeline(
     # Apply Isolation Forest gating (suppress false-positive LOWs, boost confirmed MEDIUMs)
     # Fails safely: if model not available or not enough history, anomalies pass through unchanged
     from app.services.detection.isolation_forest import apply_if_gating
-    filtered = apply_if_gating(filtered, df, tenant_id)
+    filtered = apply_if_gating(filtered, df, tenant_id, stripe_account_id=stripe_account_id)
 
     new_alerts = persist_alerts(db, tenant_id, filtered, stripe_account_id=stripe_account_id)
 
