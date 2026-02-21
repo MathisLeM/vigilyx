@@ -299,6 +299,9 @@ def persist_alerts(
                 if baseline and baseline != 0 else 0.0
             )
             severity = _bump_severity(_compute_severity(pct_deviation))
+            # IF gating boost: if any member of the group was flagged, boost once more
+            if any(g.get("if_boost") for g in group) and severity != AlertSeverity.HIGH:
+                severity = _bump_severity(severity)
 
             alert = AnomalyAlert(
                 tenant_id=tenant_id,
@@ -323,6 +326,9 @@ def persist_alerts(
                 if baseline and baseline != 0 else 0.0
             )
             severity = _compute_severity(pct_deviation)
+            # IF gating boost: IF confirmed this anomaly, bump severity once
+            if a.get("if_boost") and severity != AlertSeverity.HIGH:
+                severity = _bump_severity(severity)
 
             alert = AnomalyAlert(
                 tenant_id=tenant_id,
@@ -595,6 +601,11 @@ def run_detection_pipeline(
     # Only persist anomalies within the detection window
     # (the extra history was only used for the rolling baseline)
     filtered = [a for a in all_anomalies if a["snapshot_date"] >= detection_start]
+
+    # Apply Isolation Forest gating (suppress false-positive LOWs, boost confirmed MEDIUMs)
+    # Fails safely: if model not available or not enough history, anomalies pass through unchanged
+    from app.services.detection.isolation_forest import apply_if_gating
+    filtered = apply_if_gating(filtered, df, tenant_id)
 
     new_alerts = persist_alerts(db, tenant_id, filtered)
 
