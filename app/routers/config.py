@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
 from app.routers.auth import CurrentUser, assert_tenant_access, get_current_user
+from app.services.crypto import decrypt_key, encrypt_key
 
 router = APIRouter()
 
@@ -20,10 +21,10 @@ router = APIRouter()
 
 
 def _mask_key(key: str) -> str:
-    """sk_test_abcdefghijklmnop  →  sk_test_••••••••mnop"""
+    """sk_test_abcdefghijklmnop  ->  sk_test_........mnop"""
     if len(key) <= 8:
-        return "••••••••"
-    return key[:8] + "••••••••" + key[-4:]
+        return "........"
+    return key[:8] + "........" + key[-4:]
 
 
 def _get_tenant_or_404(tenant_id: int, db: Session) -> Tenant:
@@ -41,6 +42,16 @@ def _get_or_create_config(tenant_id: int, db: Session) -> TenantConfig:
         db.commit()
         db.refresh(cfg)
     return cfg
+
+
+def _plaintext_key(cfg: TenantConfig) -> Optional[str]:
+    """Return the decrypted Stripe key, or None if not set."""
+    if not cfg.stripe_api_key:
+        return None
+    try:
+        return decrypt_key(cfg.stripe_api_key)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -81,10 +92,11 @@ def get_config(
     assert_tenant_access(current_user, tenant_id)
     _get_tenant_or_404(tenant_id, db)
     cfg = _get_or_create_config(tenant_id, db)
+    plain = _plaintext_key(cfg)
     return ConfigOut(
         tenant_id=tenant_id,
         has_stripe_key=bool(cfg.stripe_api_key),
-        stripe_key_masked=_mask_key(cfg.stripe_api_key) if cfg.stripe_api_key else None,
+        stripe_key_masked=_mask_key(plain) if plain else None,
         updated_at=cfg.updated_at,
     )
 
@@ -105,7 +117,7 @@ def save_config(
             detail="Invalid Stripe key — must start with sk_test_ or sk_live_",
         )
     cfg = _get_or_create_config(tenant_id, db)
-    cfg.stripe_api_key = key
+    cfg.stripe_api_key = encrypt_key(key)  # store encrypted
     cfg.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(cfg)
@@ -149,10 +161,17 @@ def test_stripe_connection(
     if not cfg.stripe_api_key:
         raise HTTPException(status_code=400, detail="No Stripe API key configured")
 
+    plain = _plaintext_key(cfg)
+    if not plain:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to decrypt Stripe API key — check FERNET_KEY in .env",
+        )
+
     try:
         r = httpx.get(
             "https://api.stripe.com/v1/account",
-            headers={"Authorization": f"Bearer {cfg.stripe_api_key}"},
+            headers={"Authorization": f"Bearer {plain}"},
             timeout=8,
         )
         if r.status_code == 200:

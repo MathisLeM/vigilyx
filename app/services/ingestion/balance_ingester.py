@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.raw_balance_transaction import RawBalanceTransaction
 from app.models.tenant_config import TenantConfig
+from app.services.crypto import decrypt_key
 from app.services.ingestion.feature_builder import FeatureBuildResult, build_daily_features
 from app.services.ingestion.stripe_client import (
     StripeAuthError,
@@ -98,7 +99,7 @@ def _get_api_key(db: Session, tenant_id: int) -> str:
             f"No Stripe API key configured for tenant {tenant_id}. "
             "Add one via the Settings page."
         )
-    return cfg.stripe_api_key
+    return decrypt_key(cfg.stripe_api_key)
 
 
 def _last_ingested_at(
