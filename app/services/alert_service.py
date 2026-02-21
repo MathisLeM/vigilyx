@@ -596,4 +596,10 @@ def run_detection_pipeline(
     # (the extra history was only used for the rolling baseline)
     filtered = [a for a in all_anomalies if a["snapshot_date"] >= detection_start]
 
-    return persist_alerts(db, tenant_id, filtered)
+    new_alerts = persist_alerts(db, tenant_id, filtered)
+
+    # Send Slack notification if the tenant has a webhook configured
+    from app.services.slack_notifier import notify_new_alerts
+    notify_new_alerts(db, tenant_id, new_alerts)
+
+    return new_alerts

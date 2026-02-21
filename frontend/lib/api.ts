@@ -233,3 +233,38 @@ export function runIngestion(
 export function fetchIngestionStatus(tenantId: number): Promise<IngestionStatus> {
   return request<IngestionStatus>(`/ingestion/${tenantId}/status`);
 }
+
+// -- Slack Webhooks --------------------------------------------------------
+
+export type SlackAlertLevel = "HIGH" | "MEDIUM_AND_HIGH" | "ALL";
+
+export interface SlackConfig {
+  tenant_id: number;
+  has_slack_webhook: boolean;
+  slack_webhook_masked: string | null;
+  slack_alert_level: SlackAlertLevel | null;
+  updated_at: string | null;
+}
+
+export function fetchSlackConfig(tenantId: number): Promise<SlackConfig> {
+  return request<SlackConfig>(`/config/${tenantId}/slack`);
+}
+
+export function saveSlackConfig(
+  tenantId: number,
+  webhookUrl: string,
+  alertLevel: SlackAlertLevel
+): Promise<SlackConfig> {
+  return request<SlackConfig>(`/config/${tenantId}/slack`, {
+    method: "PUT",
+    body: JSON.stringify({ webhook_url: webhookUrl, alert_level: alertLevel }),
+  });
+}
+
+export function deleteSlackConfig(tenantId: number): Promise<SlackConfig> {
+  return request<SlackConfig>(`/config/${tenantId}/slack`, { method: "DELETE" });
+}
+
+export function testSlackWebhook(tenantId: number): Promise<TestResult> {
+  return request<TestResult>(`/config/${tenantId}/test-slack`, { method: "POST" });
+}
