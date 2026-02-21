@@ -4,7 +4,18 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { format, subDays } from "date-fns";
 import { useAuth } from "@/lib/auth";
-import { fetchSnapshots, fetchDailyAlerts, fetchTenants, runDetection, DailyAlertGroup, Alert, Snapshot, Tenant } from "@/lib/api";
+import {
+  fetchSnapshots,
+  fetchDailyAlerts,
+  fetchTenants,
+  listStripeConnections,
+  runDetection,
+  DailyAlertGroup,
+  Alert,
+  Snapshot,
+  Tenant,
+  StripeConnection,
+} from "@/lib/api";
 import KPICards from "@/components/KPICards";
 import KPIChart from "@/components/KPIChart";
 import AlertsTable from "@/components/AlertsTable";
@@ -25,6 +36,11 @@ export default function DashboardPage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<number | null>(authTenantId);
 
+  // Stripe account selector (non-admin only)
+  const [connections, setConnections] = useState<StripeConnection[]>([]);
+  // null = "All accounts" (no filter); number = specific connection id
+  const [selectedConnId, setSelectedConnId] = useState<number | null>(null);
+
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [unresolved, setUnresolved] = useState<DailyAlertGroup[]>([]);
   const [resolved, setResolved] = useState<DailyAlertGroup[]>([]);
@@ -33,7 +49,6 @@ export default function DashboardPage() {
   const [detectionMsg, setDetectionMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Redirect to login if unauthenticated
   useEffect(() => {
     if (!isAuthenticated) router.replace("/login");
   }, [isAuthenticated, router]);
@@ -50,14 +65,32 @@ export default function DashboardPage() {
 
   const activeTenantId = isAdmin ? selectedTenantId : authTenantId;
 
+  // Load stripe connections for non-admin users
+  useEffect(() => {
+    if (!isAuthenticated || isAdmin || !activeTenantId) return;
+    listStripeConnections(activeTenantId)
+      .then((conns) => {
+        setConnections(conns);
+        // Reset account filter when tenant changes
+        setSelectedConnId(null);
+      })
+      .catch(console.error);
+  }, [isAuthenticated, isAdmin, activeTenantId]);
+
+  // Derive the stripe_account_id to pass to data fetches
+  const selectedStripeAccountId: string | undefined = (() => {
+    if (selectedConnId === null) return undefined;
+    return connections.find((c) => c.id === selectedConnId)?.stripe_account_id ?? undefined;
+  })();
+
   const loadData = useCallback(async () => {
     if (!activeTenantId) return;
     setLoading(true);
     try {
       const [snaps, unres, res] = await Promise.all([
-        fetchSnapshots(activeTenantId, startDate, endDate),
-        fetchDailyAlerts(activeTenantId, false, startDate, endDate),
-        fetchDailyAlerts(activeTenantId, true, startDate, endDate),
+        fetchSnapshots(activeTenantId, startDate, endDate, selectedStripeAccountId),
+        fetchDailyAlerts(activeTenantId, false, startDate, endDate, selectedStripeAccountId),
+        fetchDailyAlerts(activeTenantId, true, startDate, endDate, selectedStripeAccountId),
       ]);
       setSnapshots(snaps);
       setUnresolved(unres);
@@ -67,7 +100,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeTenantId, startDate, endDate]);
+  }, [activeTenantId, startDate, endDate, selectedStripeAccountId]);
 
   useEffect(() => {
     if (isAuthenticated && activeTenantId) loadData();
@@ -78,14 +111,14 @@ export default function DashboardPage() {
     setDetecting(true);
     setDetectionMsg(null);
     try {
-      const result = await runDetection(activeTenantId);
+      const result = await runDetection(activeTenantId, selectedStripeAccountId);
       setDetectionMsg(
         result.created > 0
           ? `${result.created} new alert(s) generated`
           : "No new anomalies detected"
       );
       await loadData();
-    } catch (e) {
+    } catch {
       setDetectionMsg("Detection failed");
     } finally {
       setDetecting(false);
@@ -106,6 +139,9 @@ export default function DashboardPage() {
   const activeTenantName = isAdmin
     ? tenants.find((t) => t.id === selectedTenantId)?.name ?? "…"
     : null;
+
+  // Connections that have been tested (have a stripe_account_id)
+  const testedConnections = connections.filter((c) => c.stripe_account_id);
 
   return (
     <div className="flex min-h-screen">
@@ -158,6 +194,37 @@ export default function DashboardPage() {
           />
         </div>
 
+        {/* Stripe account selector — shown when tenant has tested connections */}
+        {!isAdmin && testedConnections.length > 0 && (
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+              Stripe Account
+            </label>
+            <select
+              value={selectedConnId ?? ""}
+              onChange={(e) =>
+                setSelectedConnId(e.target.value === "" ? null : Number(e.target.value))
+              }
+              className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm
+                         rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">All accounts</option>
+              {testedConnections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* No tested connections notice */}
+        {!isAdmin && connections.length > 0 && testedConnections.length === 0 && (
+          <p className="text-xs text-gray-600">
+            Test a Stripe connection in Settings to enable per-account filtering.
+          </p>
+        )}
+
         <div className="pt-2">
           <button
             onClick={handleDetect}
@@ -181,6 +248,22 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2">
             <p className="text-gray-400 text-sm">Viewing:</p>
             <p className="text-white font-semibold">{activeTenantName}</p>
+          </div>
+        )}
+
+        {/* Non-admin: selected account indicator */}
+        {!isAdmin && selectedConnId !== null && (
+          <div className="flex items-center gap-2">
+            <p className="text-gray-400 text-sm">Stripe account:</p>
+            <p className="text-white font-semibold">
+              {connections.find((c) => c.id === selectedConnId)?.name}
+            </p>
+            <button
+              onClick={() => setSelectedConnId(null)}
+              className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              (show all)
+            </button>
           </div>
         )}
 

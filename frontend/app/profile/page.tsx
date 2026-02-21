@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import { useAuth } from "@/lib/auth";
 import {
-  fetchConfig,
-  saveStripeKey,
-  deleteStripeKey,
+  listStripeConnections,
+  addStripeConnection,
+  deleteStripeConnection,
   testStripeConnection,
   fetchIngestionStatus,
   runIngestion,
@@ -18,9 +18,10 @@ import {
   listInvitations,
   createInvitation,
   revokeInvitation,
-  TenantConfig,
+  StripeConnection,
   IngestionStatus,
   IngestionResult,
+  TestResult,
   SlackConfig,
   SlackAlertLevel,
   Invitation,
@@ -41,28 +42,30 @@ const LEVEL_LABELS: Record<string, string> = {
   ALL:             "All alerts",
 };
 
+const MAX_CONNECTIONS = 5;
+
 export default function ProfilePage() {
   const { isAuthenticated, tenantId, email, isAdmin } = useAuth();
   const router = useRouter();
 
-  // Stripe
-  const [config, setConfig] = useState<TenantConfig | null>(null);
-  const [keyInput, setKeyInput] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [testStatus, setTestStatus] = useState<TestStatus>("idle");
-  const [testMessage, setTestMessage] = useState<string | null>(null);
-  const [testAccountName, setTestAccountName] = useState<string | null>(null);
+  // ── Stripe connections ─────────────────────────────────────────────────────
+  const [connections, setConnections] = useState<StripeConnection[]>([]);
+  const [addName, setAddName] = useState("");
+  const [addKey, setAddKey] = useState("");
+  const [showAddKey, setShowAddKey] = useState(false);
+  const [addSaving, setAddSaving] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [testingId, setTestingId] = useState<number | null>(null);
+  const [testResults, setTestResults] = useState<Record<number, TestResult>>({});
 
-  // Ingestion
-  const [ingestionStatus, setIngestionStatus] = useState<IngestionStatus | null>(null);
-  const [ingesting, setIngesting] = useState(false);
-  const [ingestionResult, setIngestionResult] = useState<IngestionResult | null>(null);
-  const [ingestionError, setIngestionError] = useState<string | null>(null);
+  // ── Ingestion ──────────────────────────────────────────────────────────────
+  const [ingestionStatuses, setIngestionStatuses] = useState<IngestionStatus[]>([]);
+  const [ingestingId, setIngestingId] = useState<number | null>(null);
+  const [ingestResults, setIngestResults] = useState<Record<number, IngestionResult>>({});
+  const [ingestErrors, setIngestErrors] = useState<Record<number, string>>({});
 
-  // Slack
+  // ── Slack ──────────────────────────────────────────────────────────────────
   const [slackConfig, setSlackConfig] = useState<SlackConfig | null>(null);
   const [webhookInput, setWebhookInput] = useState("");
   const [alertLevel, setAlertLevel] = useState<SlackAlertLevel>("HIGH");
@@ -72,7 +75,7 @@ export default function ProfilePage() {
   const [slackTestStatus, setSlackTestStatus] = useState<TestStatus>("idle");
   const [slackTestMessage, setSlackTestMessage] = useState<string | null>(null);
 
-  // Team / invitations
+  // ── Team / invitations ─────────────────────────────────────────────────────
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [sendingInvite, setSendingInvite] = useState(false);
@@ -85,86 +88,90 @@ export default function ProfilePage() {
   }, [isAuthenticated, router]);
 
   useEffect(() => {
-    if (isAuthenticated && tenantId) {
-      fetchConfig(tenantId).then(setConfig).catch(console.error);
-      fetchIngestionStatus(tenantId).then(setIngestionStatus).catch(console.error);
-      fetchSlackConfig(tenantId).then((sc) => {
-        setSlackConfig(sc);
-        if (sc.slack_alert_level) setAlertLevel(sc.slack_alert_level);
-      }).catch(console.error);
-      listInvitations(tenantId).then(setInvitations).catch(console.error);
-    }
+    if (!isAuthenticated || !tenantId) return;
+    listStripeConnections(tenantId).then(setConnections).catch(console.error);
+    fetchIngestionStatus(tenantId).then(setIngestionStatuses).catch(console.error);
+    fetchSlackConfig(tenantId).then((sc) => {
+      setSlackConfig(sc);
+      if (sc.slack_alert_level) setAlertLevel(sc.slack_alert_level);
+    }).catch(console.error);
+    listInvitations(tenantId).then(setInvitations).catch(console.error);
   }, [isAuthenticated, tenantId]);
 
-  // ---- Stripe handlers ----
+  // ── Stripe connection handlers ─────────────────────────────────────────────
 
-  async function handleSave(e: FormEvent) {
+  async function handleAddConnection(e: FormEvent) {
     e.preventDefault();
-    if (!tenantId || !keyInput.trim()) return;
-    setSaving(true);
-    setSaveError(null);
-    setTestStatus("idle");
+    if (!tenantId || !addName.trim() || !addKey.trim()) return;
+    setAddSaving(true);
+    setAddError(null);
     try {
-      const updated = await saveStripeKey(tenantId, keyInput.trim());
-      setConfig(updated);
-      setKeyInput("");
+      const conn = await addStripeConnection(tenantId, addName.trim(), addKey.trim());
+      setConnections((prev) => [...prev, conn]);
+      setAddName("");
+      setAddKey("");
     } catch (err: unknown) {
-      setSaveError(err instanceof Error ? err.message : "Save failed");
+      setAddError(err instanceof Error ? err.message : "Failed to add connection");
     } finally {
-      setSaving(false);
+      setAddSaving(false);
     }
   }
 
-  async function handleDelete() {
+  async function handleDelete(connId: number) {
     if (!tenantId) return;
-    setDeleting(true);
-    setTestStatus("idle");
+    setDeletingId(connId);
     try {
-      const updated = await deleteStripeKey(tenantId);
-      setConfig(updated);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setDeleting(false);
-    }
+      await deleteStripeConnection(tenantId, connId);
+      setConnections((prev) => prev.filter((c) => c.id !== connId));
+      setTestResults((prev) => { const r = { ...prev }; delete r[connId]; return r; });
+      setIngestResults((prev) => { const r = { ...prev }; delete r[connId]; return r; });
+    } catch (e) { console.error(e); }
+    finally { setDeletingId(null); }
   }
 
-  async function handleTest() {
+  async function handleTest(connId: number) {
     if (!tenantId) return;
-    setTestStatus("loading");
-    setTestMessage(null);
-    setTestAccountName(null);
+    setTestingId(connId);
     try {
-      const result = await testStripeConnection(tenantId);
-      setTestStatus(result.success ? "success" : "error");
-      setTestMessage(result.message);
-      setTestAccountName(result.account_name);
+      const result = await testStripeConnection(tenantId, connId);
+      setTestResults((prev) => ({ ...prev, [connId]: result }));
+      if (result.success) {
+        // Refresh connections to get updated stripe_account_id
+        const updated = await listStripeConnections(tenantId);
+        setConnections(updated);
+      }
     } catch {
-      setTestStatus("error");
-      setTestMessage("Request failed");
-    }
-  }
-
-  // ---- Ingestion handlers ----
-
-  async function handleIngest(forceFull: boolean) {
-    if (!tenantId) return;
-    setIngesting(true);
-    setIngestionResult(null);
-    setIngestionError(null);
-    try {
-      const result = await runIngestion(tenantId, forceFull);
-      setIngestionResult(result);
-      const status = await fetchIngestionStatus(tenantId);
-      setIngestionStatus(status);
-    } catch (err: unknown) {
-      setIngestionError(err instanceof Error ? err.message : "Ingestion failed");
+      setTestResults((prev) => ({
+        ...prev,
+        [connId]: { success: false, message: "Request failed", account_name: null, stripe_account_id: null },
+      }));
     } finally {
-      setIngesting(false);
+      setTestingId(null);
     }
   }
 
-  // ---- Slack handlers ----
+  // ── Ingestion handlers ─────────────────────────────────────────────────────
+
+  async function handleIngest(connId: number, forceFull: boolean) {
+    if (!tenantId) return;
+    setIngestingId(connId);
+    setIngestErrors((prev) => { const r = { ...prev }; delete r[connId]; return r; });
+    try {
+      const result = await runIngestion(tenantId, connId, forceFull);
+      setIngestResults((prev) => ({ ...prev, [connId]: result }));
+      const statuses = await fetchIngestionStatus(tenantId);
+      setIngestionStatuses(statuses);
+    } catch (err: unknown) {
+      setIngestErrors((prev) => ({
+        ...prev,
+        [connId]: err instanceof Error ? err.message : "Ingestion failed",
+      }));
+    } finally {
+      setIngestingId(null);
+    }
+  }
+
+  // ── Slack handlers ─────────────────────────────────────────────────────────
 
   async function handleSaveSlack(e: FormEvent) {
     e.preventDefault();
@@ -191,11 +198,8 @@ export default function ProfilePage() {
       const updated = await deleteSlackConfig(tenantId);
       setSlackConfig(updated);
       setAlertLevel("HIGH");
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setDeletingSlack(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setDeletingSlack(false); }
   }
 
   async function handleTestSlack() {
@@ -212,7 +216,7 @@ export default function ProfilePage() {
     }
   }
 
-  // ---- Team / Invitation handlers ----
+  // ── Team / invitation handlers ─────────────────────────────────────────────
 
   async function handleSendInvite(e: FormEvent) {
     e.preventDefault();
@@ -243,11 +247,8 @@ export default function ProfilePage() {
         const revokedInv = invitations.find((i) => i.id === invitationId);
         if (revokedInv?.token === lastInviteToken) setLastInviteToken(null);
       }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setRevokingId(null);
-    }
+    } catch (e) { console.error(e); }
+    finally { setRevokingId(null); }
   }
 
   if (!isAuthenticated) return null;
@@ -287,83 +288,123 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* ── Section 2: Stripe Configuration ── */}
+        {/* ── Section 2: Stripe Connections ── */}
         {isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
             <p className="text-sm text-gray-500">
-              Stripe configuration is managed per company. Sign in as a company account to configure its API key.
+              Stripe configuration is managed per company. Sign in as a company account to configure its connections.
             </p>
           </section>
         )}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-200">Stripe Configuration</h2>
-              {config && (
-                <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
-                  config.has_stripe_key
-                    ? "bg-emerald-950 text-emerald-400 border-emerald-800"
-                    : "bg-gray-800 text-gray-500 border-gray-700"
-                }`}>
-                  {config.has_stripe_key ? "● Connected" : "○ Not connected"}
-                </span>
-              )}
+              <div>
+                <h2 className="text-base font-semibold text-gray-200">Stripe Connections</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Up to {MAX_CONNECTIONS} Stripe accounts. Test each connection to enable ingestion.
+                </p>
+              </div>
+              <span className="text-xs font-semibold px-3 py-1 rounded-full border border-gray-700 text-gray-400">
+                {connections.length} / {MAX_CONNECTIONS}
+              </span>
             </div>
 
-            {config?.has_stripe_key && (
-              <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Current API key</p>
-                    <p className="font-mono text-sm text-gray-200">{config.stripe_key_masked}</p>
-                    {config.updated_at && (
-                      <p className="text-xs text-gray-600 mt-1">
-                        Last updated {format(parseISO(config.updated_at), "MMM d, yyyy 'at' HH:mm")}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    className="text-xs text-red-400 hover:text-red-300 border border-red-800
-                               hover:bg-red-950 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    {deleting ? "Removing…" : "Remove"}
-                  </button>
-                </div>
+            {/* Connection cards */}
+            {connections.length > 0 && (
+              <div className="space-y-3">
+                {connections.map((conn) => {
+                  const tr = testResults[conn.id];
+                  const isTesting = testingId === conn.id;
+                  const isDeleting = deletingId === conn.id;
+                  const statusLabel = conn.stripe_account_id
+                    ? "● Connected"
+                    : conn.has_key
+                    ? "○ Not tested"
+                    : "○ No key";
+                  const statusColor = conn.stripe_account_id
+                    ? "text-emerald-400 border-emerald-800 bg-emerald-950"
+                    : "text-gray-500 border-gray-700 bg-gray-800";
 
-                <div className="border-t border-gray-700 pt-3 flex items-center gap-3">
-                  <button
-                    onClick={handleTest}
-                    disabled={testStatus === "loading"}
-                    className="text-sm px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600
-                               text-gray-200 transition-colors disabled:opacity-50"
-                  >
-                    {testStatus === "loading" ? "Testing…" : "Test connection"}
-                  </button>
-                  {testStatus === "success" && (
-                    <div className="text-sm text-emerald-400">
-                      ✓ {testMessage}
-                      {testAccountName && <span className="text-gray-400"> — {testAccountName}</span>}
+                  return (
+                    <div
+                      key={conn.id}
+                      className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-white">{conn.name}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor}`}>
+                              {statusLabel}
+                            </span>
+                          </div>
+                          {conn.stripe_account_id && (
+                            <p className="text-xs font-mono text-gray-500 mt-0.5">{conn.stripe_account_id}</p>
+                          )}
+                          {conn.updated_at && (
+                            <p className="text-xs text-gray-600 mt-0.5">
+                              Updated {format(parseISO(conn.updated_at), "MMM d, yyyy 'at' HH:mm")}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleDelete(conn.id)}
+                          disabled={isDeleting}
+                          className="shrink-0 text-xs text-red-400 hover:text-red-300 border border-red-800
+                                     hover:bg-red-950 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {isDeleting ? "Removing…" : "Remove"}
+                        </button>
+                      </div>
+
+                      {conn.has_key && (
+                        <div className="border-t border-gray-700 pt-3 flex items-center gap-3 flex-wrap">
+                          <button
+                            onClick={() => handleTest(conn.id)}
+                            disabled={isTesting}
+                            className="text-sm px-4 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600
+                                       text-gray-200 transition-colors disabled:opacity-50"
+                          >
+                            {isTesting ? "Testing…" : "Test connection"}
+                          </button>
+                          {tr && (
+                            tr.success ? (
+                              <span className="text-sm text-emerald-400">
+                                ✓ {tr.message}
+                                {tr.account_name && <span className="text-gray-400"> — {tr.account_name}</span>}
+                              </span>
+                            ) : (
+                              <span className="text-sm text-red-400">✕ {tr.message}</span>
+                            )
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {testStatus === "error" && (
-                    <p className="text-sm text-red-400">✕ {testMessage}</p>
-                  )}
-                </div>
+                  );
+                })}
               </div>
             )}
 
-            <form onSubmit={handleSave} className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
-                  {config?.has_stripe_key ? "Replace API key" : "Add API key"}
-                </label>
+            {/* Add connection form */}
+            {connections.length < MAX_CONNECTIONS && (
+              <form onSubmit={handleAddConnection} className="space-y-3 pt-1">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Add connection
+                </p>
+                <input
+                  type="text"
+                  value={addName}
+                  onChange={(e) => setAddName(e.target.value)}
+                  placeholder="Connection name (e.g. Main account, EU store)"
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm
+                             rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
                 <div className="relative">
                   <input
-                    type={showKey ? "text" : "password"}
-                    value={keyInput}
-                    onChange={(e) => setKeyInput(e.target.value)}
+                    type={showAddKey ? "text" : "password"}
+                    value={addKey}
+                    onChange={(e) => setAddKey(e.target.value)}
                     placeholder="sk_test_••••••••••••••••••••••••"
                     className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm
                                font-mono rounded-lg px-4 py-2.5 pr-20
@@ -371,40 +412,39 @@ export default function ProfilePage() {
                   />
                   <button
                     type="button"
-                    onClick={() => setShowKey((v) => !v)}
+                    onClick={() => setShowAddKey((v) => !v)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500
                                hover:text-gray-300 transition-colors"
                   >
-                    {showKey ? "Hide" : "Show"}
+                    {showAddKey ? "Hide" : "Show"}
                   </button>
                 </div>
-                <p className="mt-1.5 text-xs text-gray-600">
-                  Use a secret key starting with{" "}
-                  <span className="text-gray-400 font-mono">sk_test_</span> or{" "}
-                  <span className="text-gray-400 font-mono">sk_live_</span>. Never share this key.
+                <p className="text-xs text-gray-600">
+                  Secret key starting with <span className="font-mono text-gray-400">sk_test_</span> or{" "}
+                  <span className="font-mono text-gray-400">sk_live_</span>. Never share this key.
                 </p>
-              </div>
 
-              {saveError && (
-                <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
-                  {saveError}
-                </p>
-              )}
+                {addError && (
+                  <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
+                    {addError}
+                  </p>
+                )}
 
-              <button
-                type="submit"
-                disabled={saving || !keyInput.trim()}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
-                           disabled:cursor-not-allowed text-white text-sm font-semibold
-                           rounded-lg px-4 py-2.5 transition-colors"
-              >
-                {saving ? "Saving…" : "Save API key"}
-              </button>
-            </form>
+                <button
+                  type="submit"
+                  disabled={addSaving || !addName.trim() || !addKey.trim()}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
+                             disabled:cursor-not-allowed text-white text-sm font-semibold
+                             rounded-lg px-4 py-2.5 transition-colors"
+                >
+                  {addSaving ? "Saving…" : "Add connection"}
+                </button>
+              </form>
+            )}
 
             <p className="text-xs text-gray-600">
-              Your key is stored server-side and never exposed in full after saving.
-              It is used to pull data from Stripe for anomaly detection.
+              Keys are stored encrypted server-side. Test each connection to discover its Stripe account ID
+              and enable scheduled ingestion.
             </p>
           </section>
         )}
@@ -412,97 +452,114 @@ export default function ProfilePage() {
         {/* ── Section 3: Data Ingestion ── */}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-200">Data Ingestion</h2>
-              {ingestionStatus && (
-                <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
-                  ingestionStatus.last_ingested_at
-                    ? "bg-emerald-950 text-emerald-400 border-emerald-800"
-                    : "bg-gray-800 text-gray-500 border-gray-700"
-                }`}>
-                  {ingestionStatus.last_ingested_at ? "● Synced" : "○ Never synced"}
-                </span>
-              )}
-            </div>
+            <h2 className="text-base font-semibold text-gray-200">Data Ingestion</h2>
+            <p className="text-xs text-gray-500">
+              Sync Stripe transactions per connection. Incremental pulls new data only; Full re-pull fetches up to 90 days.
+            </p>
 
-            {ingestionStatus && (
-              <div className="grid grid-cols-[160px_1fr] gap-y-2 text-sm">
-                <span className="text-gray-500">Last synced</span>
-                <span className="text-gray-200">
-                  {ingestionStatus.last_ingested_at
-                    ? format(new Date(ingestionStatus.last_ingested_at), "MMM d, yyyy 'at' HH:mm")
-                    : <span className="text-gray-600">Never</span>}
-                </span>
-                <span className="text-gray-500">Raw rows in DB</span>
-                <span className="text-gray-200 font-mono">{ingestionStatus.total_raw_rows.toLocaleString()}</span>
-                <span className="text-gray-500">Stripe key</span>
-                <span className={ingestionStatus.has_stripe_key ? "text-emerald-400" : "text-red-400"}>
-                  {ingestionStatus.has_stripe_key ? "Configured" : "Missing — add key above first"}
-                </span>
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => handleIngest(false)}
-                disabled={ingesting || !ingestionStatus?.has_stripe_key}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
-                           disabled:cursor-not-allowed text-white text-sm font-semibold
-                           rounded-lg px-4 py-2.5 transition-colors"
-              >
-                {ingesting ? "Syncing…" : "⚡ Sync (incremental)"}
-              </button>
-              <button
-                onClick={() => handleIngest(true)}
-                disabled={ingesting || !ingestionStatus?.has_stripe_key}
-                className="px-4 py-2.5 rounded-lg border border-gray-700 text-gray-400
-                           hover:text-white hover:bg-gray-800 disabled:opacity-50
-                           disabled:cursor-not-allowed text-sm transition-colors"
-              >
-                Full re-pull
-              </button>
-            </div>
-
-            {ingestionResult && (
-              <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-1 text-sm">
-                <p className="text-emerald-400 font-semibold mb-2">Sync complete</p>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
-                  <span className="text-gray-500">Raw rows inserted</span>
-                  <span className="text-gray-200">{ingestionResult.raw_inserted}</span>
-                  <span className="text-gray-500">Raw rows skipped</span>
-                  <span className="text-gray-200">{ingestionResult.raw_skipped}</span>
-                  <span className="text-gray-500">Feature rows written</span>
-                  <span className="text-gray-200">{ingestionResult.features_written}</span>
-                  <span className="text-gray-500">Feature rows skipped</span>
-                  <span className="text-gray-200">{ingestionResult.features_skipped}</span>
-                  {ingestionResult.date_range && (
-                    <>
-                      <span className="text-gray-500">Date range</span>
-                      <span className="text-gray-200 font-mono">
-                        {ingestionResult.date_range[0]} → {ingestionResult.date_range[1]}
-                      </span>
-                    </>
-                  )}
-                  {ingestionResult.duration_seconds != null && (
-                    <>
-                      <span className="text-gray-500">Duration</span>
-                      <span className="text-gray-200">{ingestionResult.duration_seconds.toFixed(1)}s</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {ingestionError && (
-              <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
-                {ingestionError}
+            {connections.length === 0 && (
+              <p className="text-sm text-gray-600">
+                Add and test a Stripe connection above to enable data ingestion.
               </p>
             )}
 
-            <p className="text-xs text-gray-600">
-              Incremental sync pulls only new transactions since the last run. Full re-pull
-              fetches the entire lookback window (up to 90 days).
-            </p>
+            {connections.map((conn) => {
+              const status = ingestionStatuses.find((s) => s.connection_id === conn.id);
+              const result = ingestResults[conn.id];
+              const error = ingestErrors[conn.id];
+              const isIngesting = ingestingId === conn.id;
+              const canIngest = conn.has_key;
+
+              return (
+                <div key={conn.id} className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{conn.name}</p>
+                      {conn.stripe_account_id && (
+                        <p className="text-xs font-mono text-gray-500">{conn.stripe_account_id}</p>
+                      )}
+                    </div>
+                    {status && (
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                        status.last_ingested_at
+                          ? "bg-emerald-950 text-emerald-400 border-emerald-800"
+                          : "bg-gray-700 text-gray-500 border-gray-600"
+                      }`}>
+                        {status.last_ingested_at ? "● Synced" : "○ Never synced"}
+                      </span>
+                    )}
+                  </div>
+
+                  {status && (
+                    <div className="grid grid-cols-[140px_1fr] gap-y-1 text-xs">
+                      <span className="text-gray-500">Last synced</span>
+                      <span className="text-gray-300">
+                        {status.last_ingested_at
+                          ? format(new Date(status.last_ingested_at), "MMM d, yyyy 'at' HH:mm")
+                          : <span className="text-gray-600">Never</span>}
+                      </span>
+                      <span className="text-gray-500">Raw rows in DB</span>
+                      <span className="text-gray-300 font-mono">{status.total_raw_rows.toLocaleString()}</span>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleIngest(conn.id, false)}
+                      disabled={isIngesting || !canIngest}
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
+                                 disabled:cursor-not-allowed text-white text-xs font-semibold
+                                 rounded-lg px-3 py-2 transition-colors"
+                    >
+                      {isIngesting ? "Syncing…" : "⚡ Sync"}
+                    </button>
+                    <button
+                      onClick={() => handleIngest(conn.id, true)}
+                      disabled={isIngesting || !canIngest}
+                      className="px-3 py-2 rounded-lg border border-gray-600 text-gray-400
+                                 hover:text-white hover:bg-gray-700 disabled:opacity-50
+                                 disabled:cursor-not-allowed text-xs transition-colors"
+                    >
+                      Full re-pull
+                    </button>
+                  </div>
+
+                  {result && (
+                    <div className="bg-gray-900 rounded-lg px-3 py-2 space-y-1 text-xs">
+                      <p className="text-emerald-400 font-semibold">Sync complete</p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs mt-1">
+                        <span className="text-gray-500">Raw inserted</span>
+                        <span className="text-gray-300">{result.raw_inserted}</span>
+                        <span className="text-gray-500">Raw skipped</span>
+                        <span className="text-gray-300">{result.raw_skipped}</span>
+                        <span className="text-gray-500">Features written</span>
+                        <span className="text-gray-300">{result.features_written}</span>
+                        {result.date_range && (
+                          <>
+                            <span className="text-gray-500">Date range</span>
+                            <span className="text-gray-300 font-mono">
+                              {result.date_range[0]} → {result.date_range[1]}
+                            </span>
+                          </>
+                        )}
+                        {result.duration_seconds != null && (
+                          <>
+                            <span className="text-gray-500">Duration</span>
+                            <span className="text-gray-300">{result.duration_seconds.toFixed(1)}s</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {error && (
+                    <p className="text-xs text-red-400 bg-red-950 border border-red-800 rounded-lg px-3 py-2">
+                      {error}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </section>
         )}
 
@@ -527,7 +584,6 @@ export default function ProfilePage() {
               )}
             </div>
 
-            {/* Current webhook display */}
             {slackConfig?.has_slack_webhook && (
               <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
@@ -556,7 +612,6 @@ export default function ProfilePage() {
                   </button>
                 </div>
 
-                {/* Test button */}
                 <div className="border-t border-gray-700 pt-3 flex items-center gap-3">
                   <button
                     onClick={handleTestSlack}
@@ -576,7 +631,6 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* Connect / update form */}
             <form onSubmit={handleSaveSlack} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
@@ -596,7 +650,6 @@ export default function ProfilePage() {
                 </p>
               </div>
 
-              {/* Alert level selector */}
               <div>
                 <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
                   Alert level
@@ -655,7 +708,6 @@ export default function ProfilePage() {
               Invite coworkers to join your company account. They will receive a one-time link to set a password.
             </p>
 
-            {/* Invite form */}
             <form onSubmit={handleSendInvite} className="flex gap-3">
               <input
                 type="email"
@@ -684,7 +736,6 @@ export default function ProfilePage() {
               </p>
             )}
 
-            {/* Copyable link for the last invite */}
             {lastInviteToken && (
               <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 space-y-2">
                 <p className="text-xs text-gray-400 font-medium">Invite link (valid 7 days)</p>
@@ -708,7 +759,6 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* Pending invitations list */}
             {invitations.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pending invitations</p>

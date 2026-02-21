@@ -35,6 +35,7 @@ class AnomalyAlert(Base):
     __table_args__ = (
         UniqueConstraint(
             "tenant_id",
+            "stripe_account_id",
             "snapshot_date",
             "metric_name",
             "detection_method",
@@ -44,6 +45,7 @@ class AnomalyAlert(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    stripe_account_id = Column(String(100), nullable=True, index=True)  # NULL = legacy / unknown
     snapshot_date = Column(Date, nullable=False, index=True)
     metric_name = Column(String(50), nullable=False)
     metric_value = Column(Float, nullable=False)

@@ -21,6 +21,8 @@ async function request<T>(
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "API error");
   }
+  // 204 No Content — no body
+  if (res.status === 204) return undefined as unknown as T;
   return res.json();
 }
 
@@ -92,11 +94,15 @@ export interface Snapshot {
 export function fetchSnapshots(
   tenantId: number,
   startDate: string,
-  endDate: string
+  endDate: string,
+  stripeAccountId?: string
 ): Promise<Snapshot[]> {
-  return request<Snapshot[]>(
-    `/metrics/${tenantId}/snapshots?start_date=${startDate}&end_date=${endDate}`
-  );
+  const params = new URLSearchParams({
+    start_date: startDate,
+    end_date: endDate,
+  });
+  if (stripeAccountId) params.set("stripe_account_id", stripeAccountId);
+  return request<Snapshot[]>(`/metrics/${tenantId}/snapshots?${params}`);
 }
 
 // ── Alerts ────────────────────────────────────────────────────────────────
@@ -104,6 +110,7 @@ export function fetchSnapshots(
 export interface Alert {
   id: number;
   tenant_id: number;
+  stripe_account_id: string | null;
   snapshot_date: string;
   metric_name: string;
   metric_value: number;
@@ -124,11 +131,16 @@ export function fetchAlerts(
   tenantId: number,
   resolved: boolean,
   startDate: string,
-  endDate: string
+  endDate: string,
+  stripeAccountId?: string
 ): Promise<Alert[]> {
-  return request<Alert[]>(
-    `/alerts/${tenantId}/?resolved=${resolved}&start_date=${startDate}&end_date=${endDate}`
-  );
+  const params = new URLSearchParams({
+    resolved: String(resolved),
+    start_date: startDate,
+    end_date: endDate,
+  });
+  if (stripeAccountId) params.set("stripe_account_id", stripeAccountId);
+  return request<Alert[]>(`/alerts/${tenantId}/?${params}`);
 }
 
 export function resolveAlert(tenantId: number, alertId: number): Promise<Alert> {
@@ -150,26 +162,40 @@ export function fetchDailyAlerts(
   tenantId: number,
   resolved: boolean,
   startDate: string,
-  endDate: string
+  endDate: string,
+  stripeAccountId?: string
 ): Promise<DailyAlertGroup[]> {
-  return request<DailyAlertGroup[]>(
-    `/alerts/${tenantId}/daily?resolved=${resolved}&start_date=${startDate}&end_date=${endDate}`
-  );
+  const params = new URLSearchParams({
+    resolved: String(resolved),
+    start_date: startDate,
+    end_date: endDate,
+  });
+  if (stripeAccountId) params.set("stripe_account_id", stripeAccountId);
+  return request<DailyAlertGroup[]>(`/alerts/${tenantId}/daily?${params}`);
 }
 
-export function runDetection(tenantId: number): Promise<{ created: number }> {
+export function runDetection(
+  tenantId: number,
+  stripeAccountId?: string
+): Promise<{ created: number }> {
   return request<{ created: number }>(`/alerts/${tenantId}/run-detection`, {
     method: "POST",
-    body: JSON.stringify({ detection_days: 7 }),
+    body: JSON.stringify({
+      detection_days: 7,
+      stripe_account_id: stripeAccountId ?? null,
+    }),
   });
 }
 
-// ── Config ────────────────────────────────────────────────────────────────
+// ── Stripe Connections ────────────────────────────────────────────────────
 
-export interface TenantConfig {
+export interface StripeConnection {
+  id: number;
   tenant_id: number;
-  has_stripe_key: boolean;
-  stripe_key_masked: string | null;
+  name: string;
+  has_key: boolean;
+  stripe_account_id: string | null;
+  created_at: string | null;
   updated_at: string | null;
 }
 
@@ -177,32 +203,61 @@ export interface TestResult {
   success: boolean;
   message: string;
   account_name: string | null;
+  stripe_account_id: string | null;
 }
 
-export function fetchConfig(tenantId: number): Promise<TenantConfig> {
-  return request<TenantConfig>(`/config/${tenantId}`);
+export function listStripeConnections(tenantId: number): Promise<StripeConnection[]> {
+  return request<StripeConnection[]>(`/config/${tenantId}/stripe-connections`);
 }
 
-export function saveStripeKey(tenantId: number, key: string): Promise<TenantConfig> {
-  return request<TenantConfig>(`/config/${tenantId}`, {
-    method: "PUT",
-    body: JSON.stringify({ stripe_api_key: key }),
+export function addStripeConnection(
+  tenantId: number,
+  name: string,
+  stripeApiKey: string
+): Promise<StripeConnection> {
+  return request<StripeConnection>(`/config/${tenantId}/stripe-connections`, {
+    method: "POST",
+    body: JSON.stringify({ name, stripe_api_key: stripeApiKey }),
   });
 }
 
-export function deleteStripeKey(tenantId: number): Promise<TenantConfig> {
-  return request<TenantConfig>(`/config/${tenantId}/stripe-key`, { method: "DELETE" });
+export function updateStripeConnection(
+  tenantId: number,
+  connId: number,
+  patch: { name?: string; stripe_api_key?: string }
+): Promise<StripeConnection> {
+  return request<StripeConnection>(
+    `/config/${tenantId}/stripe-connections/${connId}`,
+    { method: "PUT", body: JSON.stringify(patch) }
+  );
 }
 
-export function testStripeConnection(tenantId: number): Promise<TestResult> {
-  return request<TestResult>(`/config/${tenantId}/test-stripe`, { method: "POST" });
+export function deleteStripeConnection(
+  tenantId: number,
+  connId: number
+): Promise<void> {
+  return request<void>(`/config/${tenantId}/stripe-connections/${connId}`, {
+    method: "DELETE",
+  });
 }
 
-// ── Ingestion (Phase 2) ────────────────────────────────────────────────────
+export function testStripeConnection(
+  tenantId: number,
+  connId: number
+): Promise<TestResult> {
+  return request<TestResult>(
+    `/config/${tenantId}/stripe-connections/${connId}/test`,
+    { method: "POST" }
+  );
+}
+
+// ── Ingestion (Phase 2/3) ──────────────────────────────────────────────────
 
 export interface IngestionResult {
   tenant_id: number;
   stripe_account_id: string;
+  connection_id: number;
+  connection_name: string;
   raw_inserted: number;
   raw_skipped: number;
   features_written: number;
@@ -214,24 +269,27 @@ export interface IngestionResult {
 
 export interface IngestionStatus {
   tenant_id: number;
-  stripe_account_id: string;
+  connection_id: number;
+  connection_name: string;
+  stripe_account_id: string | null;
   last_ingested_at: string | null;
   total_raw_rows: number;
-  has_stripe_key: boolean;
+  has_key: boolean;
 }
 
 export function runIngestion(
   tenantId: number,
+  connectionId: number,
   forceFull = false
 ): Promise<IngestionResult> {
   return request<IngestionResult>(
-    `/ingestion/${tenantId}/run?force_full=${forceFull}`,
+    `/ingestion/${tenantId}/run?connection_id=${connectionId}&force_full=${forceFull}`,
     { method: "POST" }
   );
 }
 
-export function fetchIngestionStatus(tenantId: number): Promise<IngestionStatus> {
-  return request<IngestionStatus>(`/ingestion/${tenantId}/status`);
+export function fetchIngestionStatus(tenantId: number): Promise<IngestionStatus[]> {
+  return request<IngestionStatus[]>(`/ingestion/${tenantId}/status`);
 }
 
 // -- Slack Webhooks --------------------------------------------------------
@@ -314,8 +372,8 @@ export function revokeInvitation(tenantId: number, invitationId: number): Promis
 }
 
 export function validateInviteToken(token: string): Promise<AcceptTokenInfo> {
-  const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  return fetch(`${API}/invitations/accept?token=${encodeURIComponent(token)}`)
+  const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  return fetch(`${BASE}/invitations/accept?token=${encodeURIComponent(token)}`)
     .then((r) => {
       if (!r.ok) throw new Error("Invalid invitation");
       return r.json();
@@ -323,8 +381,8 @@ export function validateInviteToken(token: string): Promise<AcceptTokenInfo> {
 }
 
 export function acceptInvitation(token: string, password: string): Promise<AcceptOut> {
-  const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  return fetch(`${API}/invitations/accept`, {
+  const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  return fetch(`${BASE}/invitations/accept`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token, password }),

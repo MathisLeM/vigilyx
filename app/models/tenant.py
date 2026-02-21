@@ -18,3 +18,6 @@ class Tenant(Base):
     anomaly_alerts = relationship(
         "AnomalyAlert", back_populates="tenant", cascade="all, delete-orphan"
     )
+    stripe_connections = relationship(
+        "StripeConnection", back_populates="tenant", cascade="all, delete-orphan"
+    )

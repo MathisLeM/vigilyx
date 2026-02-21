@@ -1,33 +1,33 @@
 """
-INGESTION ROUTER — Phase 2/3
+INGESTION ROUTER — Phase 3
 ==============================
 Exposes endpoints to trigger and inspect Stripe data ingestion.
 
 Endpoints:
-  POST /ingestion/{tenant_id}/run
-      Trigger a full ingestion cycle for a tenant.
-      Uses the Stripe API key stored in tenant_configs.
+  POST /ingestion/{tenant_id}/run?connection_id={id}
+      Trigger an ingestion cycle for a specific Stripe connection.
       Returns an IngestionResult summary.
 
   GET  /ingestion/{tenant_id}/status
-      Returns when data was last ingested (latest raw_balance_transaction
-      created_at) and the total raw row count for this tenant.
+      Returns ingestion status for each Stripe connection the tenant has:
+      last ingested timestamp, total raw row count, and whether a key is set.
 
 The ingestion runs synchronously in the request handler for now.
-Phase 3+ can move long-running ingestions to a background task or
-Celery worker while returning a job_id immediately.
+Phase 3+ can move long-running ingestions to a background task.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.raw_balance_transaction import RawBalanceTransaction
+from app.models.stripe_connection import StripeConnection
 from app.models.tenant import Tenant
 from app.routers.auth import CurrentUser, assert_tenant_access, get_current_user
 from app.services.ingestion.balance_ingester import (
@@ -47,6 +47,8 @@ router = APIRouter()
 class IngestionResponse(BaseModel):
     tenant_id: int
     stripe_account_id: str
+    connection_id: int
+    connection_name: str
     raw_inserted: int
     raw_skipped: int
     features_written: int
@@ -58,10 +60,12 @@ class IngestionResponse(BaseModel):
 
 class IngestionStatus(BaseModel):
     tenant_id: int
-    stripe_account_id: str
+    connection_id: int
+    connection_name: str
+    stripe_account_id: Optional[str]
     last_ingested_at: Optional[datetime]
     total_raw_rows: int
-    has_stripe_key: bool
+    has_key: bool
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -75,31 +79,39 @@ def _get_tenant_or_404(tenant_id: int, db: Session) -> Tenant:
     return tenant
 
 
+def _get_connection_or_404(conn_id: int, tenant_id: int, db: Session) -> StripeConnection:
+    conn = db.query(StripeConnection).filter(
+        StripeConnection.id == conn_id,
+        StripeConnection.tenant_id == tenant_id,
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Stripe connection not found")
+    return conn
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/{tenant_id}/run", response_model=IngestionResponse)
 def trigger_ingestion(
     tenant_id: int,
-    stripe_account_id: str = Query(DEFAULT_ACCOUNT_ID),
+    connection_id: int = Query(..., description="ID of the StripeConnection to ingest from"),
     force_full: bool = Query(False, description="Ignore last-ingested timestamp and pull full lookback window"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """
-    Trigger a Stripe ingestion run for a tenant.
-
-    - Requires a Stripe API key to be saved in tenant settings first.
-    - By default performs an incremental pull (from last ingested timestamp).
-    - Use force_full=true to pull the full INGESTION_LOOKBACK_DAYS window.
+    Trigger a Stripe ingestion run for a specific connection belonging to this tenant.
+    The connection must have an API key saved.
     """
     assert_tenant_access(current_user, tenant_id)
     _get_tenant_or_404(tenant_id, db)
+    connection = _get_connection_or_404(connection_id, tenant_id, db)
 
     try:
         result: IngestionResult = run_ingestion(
             db=db,
             tenant_id=tenant_id,
-            stripe_account_id=stripe_account_id,
+            connection=connection,
             force_full=force_full,
         )
     except ValueError as exc:
@@ -112,50 +124,52 @@ def trigger_ingestion(
         logger.exception("Unexpected ingestion error for tenant %s: %s", tenant_id, exc)
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}")
 
-    d = result.to_dict()
-    return IngestionResponse(**d)
+    return IngestionResponse(**result.to_dict())
 
 
-@router.get("/{tenant_id}/status", response_model=IngestionStatus)
+@router.get("/{tenant_id}/status", response_model=list[IngestionStatus])
 def ingestion_status(
     tenant_id: int,
-    stripe_account_id: str = Query(DEFAULT_ACCOUNT_ID),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """
-    Return the current ingestion status for a tenant:
-    last ingested timestamp and total raw row count.
+    Return ingestion status for each Stripe connection the tenant has.
     """
-    from sqlalchemy import func
-    from app.models.tenant_config import TenantConfig
-
     assert_tenant_access(current_user, tenant_id)
     _get_tenant_or_404(tenant_id, db)
 
-    agg = (
-        db.query(
-            func.max(RawBalanceTransaction.created_at).label("last_at"),
-            func.count(RawBalanceTransaction.id).label("total"),
-        )
-        .filter(
-            RawBalanceTransaction.tenant_id == tenant_id,
-            RawBalanceTransaction.stripe_account_id == stripe_account_id,
-        )
-        .first()
+    connections = (
+        db.query(StripeConnection)
+        .filter(StripeConnection.tenant_id == tenant_id)
+        .order_by(StripeConnection.created_at)
+        .all()
     )
 
-    cfg = (
-        db.query(TenantConfig)
-        .filter(TenantConfig.tenant_id == tenant_id)
-        .first()
-    )
-    has_key = bool(cfg and cfg.stripe_api_key)
+    statuses = []
+    for conn in connections:
+        account_id = conn.stripe_account_id or DEFAULT_ACCOUNT_ID
+        agg = (
+            db.query(
+                func.max(RawBalanceTransaction.created_at).label("last_at"),
+                func.count(RawBalanceTransaction.id).label("total"),
+            )
+            .filter(
+                RawBalanceTransaction.tenant_id == tenant_id,
+                RawBalanceTransaction.stripe_account_id == account_id,
+            )
+            .first()
+        )
+        statuses.append(
+            IngestionStatus(
+                tenant_id=tenant_id,
+                connection_id=conn.id,
+                connection_name=conn.name,
+                stripe_account_id=conn.stripe_account_id,
+                last_ingested_at=agg.last_at if agg else None,
+                total_raw_rows=agg.total if agg else 0,
+                has_key=bool(conn.encrypted_api_key),
+            )
+        )
 
-    return IngestionStatus(
-        tenant_id=tenant_id,
-        stripe_account_id=stripe_account_id,
-        last_ingested_at=agg.last_at if agg else None,
-        total_raw_rows=agg.total if agg else 0,
-        has_stripe_key=has_key,
-    )
+    return statuses

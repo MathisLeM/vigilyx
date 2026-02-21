@@ -42,6 +42,7 @@ def init_db():
         daily_revenue,
         invitation,
         raw_balance_transaction,
+        stripe_connection,
         tenant,
         tenant_config,
         user,

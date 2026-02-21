@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,7 @@ _SEVERITY_ORDER = {AlertSeverity.LOW: 0, AlertSeverity.MEDIUM: 1, AlertSeverity.
 class AlertOut(BaseModel):
     id: int
     tenant_id: int
+    stripe_account_id: Optional[str]
     snapshot_date: date
     metric_name: str
     metric_value: float
@@ -60,6 +61,7 @@ class DailyAlertGroup(BaseModel):
 
 class RunDetectionRequest(BaseModel):
     detection_days: int = 7
+    stripe_account_id: Optional[str] = None
 
 
 class RunDetectionResponse(BaseModel):
@@ -155,6 +157,7 @@ def list_daily_groups(
     resolved: Optional[bool] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    stripe_account_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -164,7 +167,10 @@ def list_daily_groups(
     """
     assert_tenant_access(current_user, tenant_id)
     _get_tenant_or_404(tenant_id, db)
-    raw = get_alerts(db, tenant_id, resolved=resolved, start=start_date, end=end_date)
+    raw = get_alerts(
+        db, tenant_id, resolved=resolved, start=start_date, end=end_date,
+        stripe_account_id=stripe_account_id,
+    )
     flat = _to_alert_out(raw)
     return _build_daily_groups(flat)
 
@@ -175,12 +181,16 @@ def list_alerts(
     resolved: Optional[bool] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    stripe_account_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     assert_tenant_access(current_user, tenant_id)
     _get_tenant_or_404(tenant_id, db)
-    raw = get_alerts(db, tenant_id, resolved=resolved, start=start_date, end=end_date)
+    raw = get_alerts(
+        db, tenant_id, resolved=resolved, start=start_date, end=end_date,
+        stripe_account_id=stripe_account_id,
+    )
     return _to_alert_out(raw)
 
 
@@ -193,7 +203,11 @@ def trigger_detection(
 ):
     assert_tenant_access(current_user, tenant_id)
     _get_tenant_or_404(tenant_id, db)
-    new_alerts = run_detection_pipeline(db, tenant_id, detection_days=payload.detection_days)
+    new_alerts = run_detection_pipeline(
+        db, tenant_id,
+        detection_days=payload.detection_days,
+        stripe_account_id=payload.stripe_account_id,
+    )
     merged = _to_alert_out(new_alerts)
     return RunDetectionResponse(created=len(merged), alerts=merged)
 

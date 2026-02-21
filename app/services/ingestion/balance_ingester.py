@@ -1,9 +1,9 @@
 """
-BALANCE INGESTER — Phase 2 ingestion
-=======================================
-Orchestrates a full ingestion run for one tenant:
+BALANCE INGESTER — Phase 2/3 ingestion
+=========================================
+Orchestrates a full ingestion run for one tenant / one Stripe connection:
 
-  1. Look up the tenant's Stripe API key from tenant_configs.
+  1. Receive a StripeConnection (caller resolves key from DB).
   2. Determine the date range to pull (last ingested timestamp or lookback window).
   3. Stream balance_transactions from Stripe via stripe_client.
   4. Upsert each validated transaction into raw_balance_transactions (idempotent).
@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.raw_balance_transaction import RawBalanceTransaction
-from app.models.tenant_config import TenantConfig
+from app.models.stripe_connection import StripeConnection
 from app.services.crypto import decrypt_key
 from app.services.ingestion.feature_builder import FeatureBuildResult, build_daily_features
 from app.services.ingestion.stripe_client import (
@@ -45,7 +45,7 @@ from data_contracts.stripe_schemas import StripeBalanceTransaction
 
 logger = logging.getLogger(__name__)
 
-# Sentinel used when no Connect account ID is available
+# Sentinel used when stripe_account_id is not yet discovered (not tested)
 DEFAULT_ACCOUNT_ID = "__default__"
 
 
@@ -53,6 +53,8 @@ DEFAULT_ACCOUNT_ID = "__default__"
 class IngestionResult:
     tenant_id: int
     stripe_account_id: str
+    connection_id: int
+    connection_name: str
     raw_inserted: int = 0
     raw_skipped: int = 0
     features_written: int = 0
@@ -66,6 +68,8 @@ class IngestionResult:
         return {
             "tenant_id": self.tenant_id,
             "stripe_account_id": self.stripe_account_id,
+            "connection_id": self.connection_id,
+            "connection_name": self.connection_name,
             "raw_inserted": self.raw_inserted,
             "raw_skipped": self.raw_skipped,
             "features_written": self.features_written,
@@ -82,24 +86,6 @@ class IngestionResult:
             ),
             "error": self.error,
         }
-
-
-def _get_api_key(db: Session, tenant_id: int) -> str:
-    """
-    Retrieve the Stripe API key for a tenant from tenant_configs.
-    Raises ValueError if no key is configured.
-    """
-    cfg = (
-        db.query(TenantConfig)
-        .filter(TenantConfig.tenant_id == tenant_id)
-        .first()
-    )
-    if not cfg or not cfg.stripe_api_key:
-        raise ValueError(
-            f"No Stripe API key configured for tenant {tenant_id}. "
-            "Add one via the Settings page."
-        )
-    return decrypt_key(cfg.stripe_api_key)
 
 
 def _last_ingested_at(
@@ -139,7 +125,7 @@ def _insert_raw(
     if txn.currency != base_currency:
         return False
 
-    usd_rate  = 1.0
+    usd_rate   = 1.0
     amount_usd = txn.amount
     fee_usd    = txn.fee
     net_usd    = txn.net
@@ -180,34 +166,47 @@ def _insert_raw(
 def run_ingestion(
     db: Session,
     tenant_id: int,
-    stripe_account_id: str = DEFAULT_ACCOUNT_ID,
+    connection: StripeConnection,
     force_full: bool = False,
 ) -> IngestionResult:
     """
-    Run a full ingestion cycle for one tenant.
+    Run a full ingestion cycle for one tenant / one Stripe connection.
 
     Args:
-        db:                 SQLAlchemy session.
-        tenant_id:          Tenant to ingest for.
-        stripe_account_id:  Stripe Connect account ID, or DEFAULT_ACCOUNT_ID.
-        force_full:         If True, ignore the last-ingested timestamp and
-                            pull the full INGESTION_LOOKBACK_DAYS window.
+        db:          SQLAlchemy session.
+        tenant_id:   Tenant to ingest for.
+        connection:  StripeConnection ORM object (must have encrypted_api_key set).
+        force_full:  If True, ignore the last-ingested timestamp and
+                     pull the full INGESTION_LOOKBACK_DAYS window.
 
     Returns:
         IngestionResult with counts and metadata.
 
     Raises:
-        ValueError:         No Stripe API key configured.
+        ValueError:         No API key configured on the connection.
         StripeAuthError:    Invalid API key.
         StripeClientError:  Unrecoverable Stripe API error.
     """
+    if not connection.encrypted_api_key:
+        raise ValueError(
+            f"No Stripe API key configured for connection '{connection.name}'. "
+            "Add one via the Settings page."
+        )
+
+    try:
+        api_key = decrypt_key(connection.encrypted_api_key)
+    except Exception as exc:
+        raise ValueError(f"Failed to decrypt API key for connection '{connection.name}': {exc}")
+
+    # Use the discovered stripe_account_id, or the default sentinel
+    stripe_account_id = connection.stripe_account_id or DEFAULT_ACCOUNT_ID
+
     result = IngestionResult(
         tenant_id=tenant_id,
         stripe_account_id=stripe_account_id,
+        connection_id=connection.id,
+        connection_name=connection.name,
     )
-
-    # -- 1. Get API key ---------------------------------------------------
-    api_key = _get_api_key(db, tenant_id)
 
     # -- 2. Determine date window -----------------------------------------
     if force_full:
@@ -224,8 +223,9 @@ def run_ingestion(
     created_before = datetime.now(timezone.utc)
 
     logger.info(
-        "Ingestion start — tenant=%s account=%s from=%s",
+        "Ingestion start — tenant=%s connection=%s account=%s from=%s",
         tenant_id,
+        connection.name,
         stripe_account_id,
         created_after.strftime("%Y-%m-%d %H:%M") if created_after else "lookback",
     )
@@ -267,7 +267,6 @@ def run_ingestion(
         result.features_skipped = feature_result.rows_skipped
         result.date_range = (min_date, max_date)
     elif result.raw_inserted == 0:
-        # No new data — still report the range we queried
         logger.info("Ingestion: no new transactions found")
 
     result.ingestion_end = datetime.now(timezone.utc)

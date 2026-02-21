@@ -140,6 +140,7 @@ def _load_metrics_df(
     tenant_id: int,
     start: date,
     end: date,
+    stripe_account_id: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Load DailyRevenueMetrics for a tenant into a DataFrame suitable for detection.
@@ -148,16 +149,17 @@ def _load_metrics_df(
     Rate values (fee_rate, refund_rate) are kept as-is (0.0–1.0).
     Returns an empty DataFrame if no data exists.
     """
-    rows = (
+    query = (
         db.query(DailyRevenueMetrics)
         .filter(
             DailyRevenueMetrics.tenant_id == tenant_id,
             DailyRevenueMetrics.snapshot_date >= start,
             DailyRevenueMetrics.snapshot_date <= end,
         )
-        .order_by(DailyRevenueMetrics.snapshot_date.asc())
-        .all()
     )
+    if stripe_account_id is not None:
+        query = query.filter(DailyRevenueMetrics.stripe_account_id == stripe_account_id)
+    rows = query.order_by(DailyRevenueMetrics.snapshot_date.asc()).all()
 
     if not rows:
         return pd.DataFrame()
@@ -264,7 +266,10 @@ def _bump_severity(severity: AlertSeverity) -> AlertSeverity:
 # ── Persistence ───────────────────────────────────────────────────────────────
 
 def persist_alerts(
-    db: Session, tenant_id: int, anomalies: list[dict]
+    db: Session,
+    tenant_id: int,
+    anomalies: list[dict],
+    stripe_account_id: Optional[str] = None,
 ) -> list[AnomalyAlert]:
     """
     Persist anomaly dicts as AnomalyAlert rows, skipping duplicates.
@@ -275,7 +280,7 @@ def persist_alerts(
       bumped one level (dual agreement = higher statistical confidence).
       Single-method alerts are stored as MAD or ZSCORE respectively.
 
-    Dedup key: (tenant_id, snapshot_date, metric_name, detection_method).
+    Dedup key: (tenant_id, stripe_account_id, snapshot_date, metric_name, detection_method).
     """
     # Group anomalies by (date, metric) to find dual-confirmed pairs
     by_key: dict[tuple, list[dict]] = defaultdict(list)
@@ -305,6 +310,7 @@ def persist_alerts(
 
             alert = AnomalyAlert(
                 tenant_id=tenant_id,
+                stripe_account_id=stripe_account_id,
                 snapshot_date=mad["snapshot_date"],
                 metric_name=mad["metric_name"],
                 metric_value=mad["metric_value"],
@@ -332,6 +338,7 @@ def persist_alerts(
 
             alert = AnomalyAlert(
                 tenant_id=tenant_id,
+                stripe_account_id=stripe_account_id,
                 snapshot_date=a["snapshot_date"],
                 metric_name=a["metric_name"],
                 metric_value=a["metric_value"],
@@ -549,6 +556,7 @@ def get_alerts(
     resolved: Optional[bool] = None,
     start: Optional[date] = None,
     end: Optional[date] = None,
+    stripe_account_id: Optional[str] = None,
 ) -> list[AnomalyAlert]:
     query = db.query(AnomalyAlert).filter(AnomalyAlert.tenant_id == tenant_id)
     if resolved is not None:
@@ -557,6 +565,8 @@ def get_alerts(
         query = query.filter(AnomalyAlert.snapshot_date >= start)
     if end:
         query = query.filter(AnomalyAlert.snapshot_date <= end)
+    if stripe_account_id is not None:
+        query = query.filter(AnomalyAlert.stripe_account_id == stripe_account_id)
     return query.order_by(
         AnomalyAlert.snapshot_date.desc(), AnomalyAlert.created_at.desc()
     ).all()
@@ -576,14 +586,17 @@ def get_alert_stats(db: Session, tenant_id: int) -> dict:
 
 
 def run_detection_pipeline(
-    db: Session, tenant_id: int, detection_days: int = 7
+    db: Session,
+    tenant_id: int,
+    detection_days: int = 7,
+    stripe_account_id: Optional[str] = None,
 ) -> list[AnomalyAlert]:
     """
     Full detection flow:
       1. Load ROLLING_WINDOW_DAYS + detection_days of DailyRevenueMetrics.
       2. Run MAD + Z-score on all 9 Stripe-aligned metrics.
       3. Filter results to the last detection_days only (context window used for baseline).
-      4. Persist new alerts, skip duplicates.
+      4. Persist new alerts (with stripe_account_id), skip duplicates.
       5. Return newly created alerts.
     """
     from app.config import settings
@@ -592,7 +605,9 @@ def run_detection_pipeline(
     detection_start = today - timedelta(days=detection_days - 1)
     context_start = today - timedelta(days=settings.ROLLING_WINDOW_DAYS + detection_days)
 
-    df = _load_metrics_df(db, tenant_id, start=context_start, end=today)
+    df = _load_metrics_df(
+        db, tenant_id, start=context_start, end=today, stripe_account_id=stripe_account_id
+    )
     if df.empty:
         return []
 
@@ -607,7 +622,7 @@ def run_detection_pipeline(
     from app.services.detection.isolation_forest import apply_if_gating
     filtered = apply_if_gating(filtered, df, tenant_id)
 
-    new_alerts = persist_alerts(db, tenant_id, filtered)
+    new_alerts = persist_alerts(db, tenant_id, filtered, stripe_account_id=stripe_account_id)
 
     # Send Slack notification if the tenant has a webhook configured
     from app.services.slack_notifier import notify_new_alerts
