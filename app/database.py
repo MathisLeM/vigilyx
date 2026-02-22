@@ -40,6 +40,7 @@ def init_db():
     from app.models import (  # noqa: F401
         alert,
         daily_revenue,
+        email_alert_config,
         invitation,
         raw_balance_transaction,
         stripe_connection,
