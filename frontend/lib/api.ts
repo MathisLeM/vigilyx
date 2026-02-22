@@ -330,6 +330,59 @@ export function trainAccountModel(
   );
 }
 
+// -- Email Alerts ----------------------------------------------------------
+
+export type EmailAlertLevel = "HIGH" | "MEDIUM_AND_HIGH" | "ALL";
+
+export interface EmailConfig {
+  tenant_id: number;
+  alert_email: string;
+  alert_level: EmailAlertLevel;
+  is_verified: boolean;
+  verified_at: string | null;
+  updated_at: string | null;
+}
+
+export interface VerifyEmailResponse {
+  success: boolean;
+  message: string;
+}
+
+export function fetchEmailConfig(tenantId: number): Promise<EmailConfig | null> {
+  return request<EmailConfig | null>(`/config/${tenantId}/email`);
+}
+
+export function saveEmailConfig(
+  tenantId: number,
+  alertEmail: string,
+  alertLevel: EmailAlertLevel
+): Promise<EmailConfig> {
+  return request<EmailConfig>(`/config/${tenantId}/email`, {
+    method: "PUT",
+    body: JSON.stringify({ alert_email: alertEmail, alert_level: alertLevel }),
+  });
+}
+
+export function deleteEmailConfig(tenantId: number): Promise<void> {
+  return request<void>(`/config/${tenantId}/email`, { method: "DELETE" });
+}
+
+export function resendEmailVerification(tenantId: number): Promise<VerifyEmailResponse> {
+  return request<VerifyEmailResponse>(
+    `/config/${tenantId}/email/resend-verification`,
+    { method: "POST" }
+  );
+}
+
+export function verifyEmailToken(token: string): Promise<VerifyEmailResponse> {
+  const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  return fetch(`${BASE}/config/email/verify?token=${encodeURIComponent(token)}`)
+    .then(async (r) => {
+      const data = await r.json();
+      return data as VerifyEmailResponse;
+    });
+}
+
 // -- Slack Webhooks --------------------------------------------------------
 
 export type SlackAlertLevel = "HIGH" | "MEDIUM_AND_HIGH" | "ALL";

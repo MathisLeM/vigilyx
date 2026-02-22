@@ -628,4 +628,8 @@ def run_detection_pipeline(
     from app.services.slack_notifier import notify_new_alerts
     notify_new_alerts(db, tenant_id, new_alerts)
 
+    # Send email notification if the tenant has a verified email configured
+    from app.services.email_service import notify_new_alerts as email_notify
+    email_notify(db, tenant_id, new_alerts)
+
     return new_alerts

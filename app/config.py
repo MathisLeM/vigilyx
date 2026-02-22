@@ -48,6 +48,18 @@ class Settings(BaseSettings):
     INGESTION_LOOKBACK_DAYS: int = 90
     BASE_CURRENCY: str = "usd"
 
+    # -- Email (SMTP) ----------------------------------------------------------
+    # Leave SMTP_HOST empty to disable email alerts.
+    # Works with Gmail (host=smtp.gmail.com, port=587, user=you@gmail.com, app password),
+    # SendGrid SMTP (host=smtp.sendgrid.net, port=587), Mailgun SMTP, etc.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASS: str = ""
+    FROM_EMAIL: str = ""   # e.g. "Vigilyx <alerts@yourdomain.com>"
+    # Frontend URL — used to build email verification links.
+    APP_URL: str = "http://localhost:3000"
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"

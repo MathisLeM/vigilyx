@@ -13,6 +13,11 @@ import {
   runIngestion,
   fetchModelStatus,
   trainAccountModel,
+  fetchEmailConfig,
+  saveEmailConfig,
+  deleteEmailConfig,
+  resendEmailVerification,
+  verifyEmailToken,
   fetchSlackConfig,
   saveSlackConfig,
   deleteSlackConfig,
@@ -26,11 +31,15 @@ import {
   ModelStatus,
   TrainResult,
   TestResult,
+  EmailConfig,
+  EmailAlertLevel,
   SlackConfig,
   SlackAlertLevel,
   Invitation,
 } from "@/lib/api";
 import NavSidebar from "@/components/NavSidebar";
+
+import { useSearchParams } from "next/navigation";
 
 type TestStatus = "idle" | "loading" | "success" | "error";
 
@@ -51,6 +60,7 @@ const MAX_CONNECTIONS = 5;
 export default function ProfilePage() {
   const { isAuthenticated, tenantId, email, isAdmin } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // ── Stripe connections ─────────────────────────────────────────────────────
   const [connections, setConnections] = useState<StripeConnection[]>([]);
@@ -74,6 +84,16 @@ export default function ProfilePage() {
   const [trainingId, setTrainingId] = useState<number | null>(null);
   const [trainResults, setTrainResults] = useState<Record<number, TrainResult>>({});
   const [trainErrors, setTrainErrors] = useState<Record<number, string>>({});
+
+  // ── Email alerts ───────────────────────────────────────────────────────────
+  const [emailConfig, setEmailConfig] = useState<EmailConfig | null | undefined>(undefined);
+  const [emailInput, setEmailInput] = useState("");
+  const [emailLevel, setEmailLevel] = useState<EmailAlertLevel>("HIGH");
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [emailSaveError, setEmailSaveError] = useState<string | null>(null);
+  const [deletingEmail, setDeletingEmail] = useState(false);
+  const [resendingVerification, setResendingVerification] = useState(false);
+  const [emailVerifyBanner, setEmailVerifyBanner] = useState<{ success: boolean; message: string } | null>(null);
 
   // ── Slack ──────────────────────────────────────────────────────────────────
   const [slackConfig, setSlackConfig] = useState<SlackConfig | null>(null);
@@ -102,12 +122,30 @@ export default function ProfilePage() {
     listStripeConnections(tenantId).then(setConnections).catch(console.error);
     fetchIngestionStatus(tenantId).then(setIngestionStatuses).catch(console.error);
     fetchModelStatus(tenantId).then(setModelStatuses).catch(console.error);
+    fetchEmailConfig(tenantId).then((cfg) => {
+      setEmailConfig(cfg);
+      if (cfg?.alert_level) setEmailLevel(cfg.alert_level as EmailAlertLevel);
+    }).catch(console.error);
     fetchSlackConfig(tenantId).then((sc) => {
       setSlackConfig(sc);
       if (sc.slack_alert_level) setAlertLevel(sc.slack_alert_level);
     }).catch(console.error);
     listInvitations(tenantId).then(setInvitations).catch(console.error);
   }, [isAuthenticated, tenantId]);
+
+  // Handle ?email_token=<token> — verify on mount
+  useEffect(() => {
+    const token = searchParams?.get("email_token");
+    if (!token) return;
+    // Clean the URL immediately
+    router.replace("/profile", { scroll: false });
+    verifyEmailToken(token).then((res) => {
+      setEmailVerifyBanner(res);
+      // Refresh email config to show verified state
+      if (tenantId) fetchEmailConfig(tenantId).then(setEmailConfig).catch(console.error);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Stripe connection handlers ─────────────────────────────────────────────
 
@@ -201,6 +239,52 @@ export default function ProfilePage() {
       }));
     } finally {
       setTrainingId(null);
+    }
+  }
+
+  // ── Email alert handlers ───────────────────────────────────────────────────
+
+  async function handleSaveEmail(e: FormEvent) {
+    e.preventDefault();
+    if (!tenantId || !emailInput.trim()) return;
+    setSavingEmail(true);
+    setEmailSaveError(null);
+    setEmailVerifyBanner(null);
+    try {
+      const updated = await saveEmailConfig(tenantId, emailInput.trim(), emailLevel);
+      setEmailConfig(updated);
+      setEmailInput("");
+      setEmailVerifyBanner({ success: true, message: `Verification email sent to ${updated.alert_email}` });
+    } catch (err: unknown) {
+      setEmailSaveError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSavingEmail(false);
+    }
+  }
+
+  async function handleDeleteEmail() {
+    if (!tenantId) return;
+    setDeletingEmail(true);
+    try {
+      await deleteEmailConfig(tenantId);
+      setEmailConfig(null);
+      setEmailInput("");
+      setEmailVerifyBanner(null);
+    } catch (e) { console.error(e); }
+    finally { setDeletingEmail(false); }
+  }
+
+  async function handleResendVerification() {
+    if (!tenantId) return;
+    setResendingVerification(true);
+    setEmailVerifyBanner(null);
+    try {
+      const res = await resendEmailVerification(tenantId);
+      setEmailVerifyBanner(res);
+    } catch {
+      setEmailVerifyBanner({ success: false, message: "Failed to send verification email" });
+    } finally {
+      setResendingVerification(false);
     }
   }
 
@@ -596,7 +680,164 @@ export default function ProfilePage() {
           </section>
         )}
 
-        {/* ── Section 4: Slack Alerts ── */}
+        {/* ── Section 4: Email Alerts ── */}
+        {!isAdmin && (
+          <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-200">Email Alerts</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Receive an email whenever anomalies are detected.
+                </p>
+              </div>
+              {emailConfig !== undefined && (
+                <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
+                  emailConfig?.is_verified
+                    ? "bg-emerald-950 text-emerald-400 border-emerald-800"
+                    : emailConfig
+                    ? "bg-amber-950 text-amber-400 border-amber-800"
+                    : "bg-gray-800 text-gray-500 border-gray-700"
+                }`}>
+                  {emailConfig?.is_verified
+                    ? "● Verified"
+                    : emailConfig
+                    ? "○ Pending verification"
+                    : "○ Not configured"}
+                </span>
+              )}
+            </div>
+
+            {/* Verification banner (from link click or resend) */}
+            {emailVerifyBanner && (
+              <div className={`rounded-lg px-4 py-3 text-sm flex items-start justify-between gap-3 ${
+                emailVerifyBanner.success
+                  ? "bg-emerald-950 border border-emerald-800 text-emerald-300"
+                  : "bg-red-950 border border-red-800 text-red-400"
+              }`}>
+                <span>{emailVerifyBanner.success ? "✓ " : "✕ "}{emailVerifyBanner.message}</span>
+                <button
+                  onClick={() => setEmailVerifyBanner(null)}
+                  className="shrink-0 text-xs opacity-60 hover:opacity-100"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Current config card */}
+            {emailConfig && (
+              <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">{emailConfig.alert_email}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Alert level:{" "}
+                      <span className="text-gray-300">
+                        {LEVEL_LABELS[emailConfig.alert_level] ?? emailConfig.alert_level}
+                      </span>
+                    </p>
+                    {emailConfig.is_verified && emailConfig.verified_at && (
+                      <p className="text-xs text-gray-600 mt-0.5">
+                        Verified {format(parseISO(emailConfig.verified_at), "MMM d, yyyy 'at' HH:mm")}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleDeleteEmail}
+                    disabled={deletingEmail}
+                    className="shrink-0 text-xs text-red-400 hover:text-red-300 border border-red-800
+                               hover:bg-red-950 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {deletingEmail ? "Removing…" : "Remove"}
+                  </button>
+                </div>
+                {!emailConfig.is_verified && (
+                  <div className="border-t border-gray-700 pt-3 flex items-center gap-3">
+                    <p className="text-xs text-amber-400 flex-1">
+                      Check your inbox for a confirmation link.
+                    </p>
+                    <button
+                      onClick={handleResendVerification}
+                      disabled={resendingVerification}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600
+                                 text-gray-200 transition-colors disabled:opacity-50"
+                    >
+                      {resendingVerification ? "Sending…" : "Resend"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Add / update form */}
+            <form onSubmit={handleSaveEmail} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                  {emailConfig ? "Update email address" : "Email address"}
+                </label>
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  placeholder="alerts@yourcompany.com"
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm
+                             rounded-lg px-4 py-2.5
+                             focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                  Alert level
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {ALERT_LEVELS.map(({ value, label, description }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setEmailLevel(value as EmailAlertLevel)}
+                      className={`text-center px-3 py-3 rounded-xl border text-sm transition-colors ${
+                        emailLevel === value
+                          ? "bg-indigo-900 border-indigo-600 text-indigo-200"
+                          : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300"
+                      }`}
+                    >
+                      <div className="font-semibold">{label}</div>
+                      <div className="text-xs mt-0.5 opacity-60">{description}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {emailSaveError && (
+                <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
+                  {emailSaveError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={savingEmail || !emailInput.trim()}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
+                           disabled:cursor-not-allowed text-white text-sm font-semibold
+                           rounded-lg px-4 py-2.5 transition-colors"
+              >
+                {savingEmail
+                  ? "Saving…"
+                  : emailConfig
+                  ? "Update email"
+                  : "Save email address"}
+              </button>
+            </form>
+
+            <p className="text-xs text-gray-600">
+              A confirmation link will be sent to the address. Alerts fire automatically
+              after each detection run once the address is verified.
+            </p>
+          </section>
+        )}
+
+        {/* ── Section 5: Slack Alerts (was Section 4) ── */}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
             <div className="flex items-center justify-between">
@@ -733,7 +974,7 @@ export default function ProfilePage() {
           </section>
         )}
 
-        {/* ── Section 5: AI Model ── */}
+        {/* ── Section 6: AI Model ── */}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
             <div>
@@ -881,8 +1122,7 @@ export default function ProfilePage() {
           </section>
         )}
 
-        {/* ── Section 6: Team ── */}
-        {/* (was Section 5 before AI Model section was added) */}
+        {/* ── Section 7: Team ── */}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
             <h2 className="text-base font-semibold text-gray-200">Team</h2>

@@ -454,3 +454,194 @@ def test_slack_webhook(
         return TestResult(success=False, message="Request timed out — check your network")
     except Exception as e:
         return TestResult(success=False, message=f"Error: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Email alert config schemas
+# ---------------------------------------------------------------------------
+
+
+class EmailConfigOut(BaseModel):
+    tenant_id: int
+    alert_email: str
+    alert_level: str
+    is_verified: bool
+    verified_at: Optional[datetime]
+    updated_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class SaveEmailRequest(BaseModel):
+    alert_email: EmailStr
+    alert_level: str   # HIGH | MEDIUM_AND_HIGH | ALL
+
+
+class VerifyEmailResponse(BaseModel):
+    success: bool
+    message: str
+
+
+# ---------------------------------------------------------------------------
+# Email alert config endpoints
+# ---------------------------------------------------------------------------
+
+
+def _get_email_config(tenant_id: int, db: Session) -> Optional[EmailAlertConfig]:
+    return db.query(EmailAlertConfig).filter(EmailAlertConfig.tenant_id == tenant_id).first()
+
+
+@router.get("/{tenant_id}/email", response_model=Optional[EmailConfigOut])
+def get_email_config(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    assert_tenant_access(current_user, tenant_id)
+    _get_tenant_or_404(tenant_id, db)
+    cfg = _get_email_config(tenant_id, db)
+    if not cfg:
+        return None
+    return EmailConfigOut(
+        tenant_id=cfg.tenant_id,
+        alert_email=cfg.alert_email,
+        alert_level=cfg.alert_level,
+        is_verified=cfg.is_verified,
+        verified_at=cfg.verified_at,
+        updated_at=cfg.updated_at,
+    )
+
+
+@router.put("/{tenant_id}/email", response_model=EmailConfigOut)
+def save_email_config(
+    tenant_id: int,
+    payload: SaveEmailRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    assert_tenant_access(current_user, tenant_id)
+    tenant = _get_tenant_or_404(tenant_id, db)
+
+    if payload.alert_level not in EMAIL_VALID_LEVELS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"alert_level must be one of: {', '.join(sorted(EMAIL_VALID_LEVELS))}",
+        )
+
+    now = datetime.now(timezone.utc)
+    token = secrets.token_urlsafe(32)
+    expires = now + timedelta(hours=24)
+
+    cfg = _get_email_config(tenant_id, db)
+    email_changed = cfg is None or cfg.alert_email != str(payload.alert_email)
+
+    if cfg is None:
+        cfg = EmailAlertConfig(
+            tenant_id=tenant_id,
+            alert_email=str(payload.alert_email),
+            alert_level=payload.alert_level,
+            is_verified=False,
+            verification_token=token,
+            token_expires_at=expires,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(cfg)
+    else:
+        cfg.alert_email = str(payload.alert_email)
+        cfg.alert_level = payload.alert_level
+        cfg.updated_at = now
+        if email_changed:
+            # New email address — reset verification
+            cfg.is_verified = False
+            cfg.verified_at = None
+            cfg.verification_token = token
+            cfg.token_expires_at = expires
+
+    db.commit()
+    db.refresh(cfg)
+
+    # Send verification email if address changed (or new)
+    if email_changed:
+        try:
+            send_verification_email(cfg.alert_email, token, tenant.name)
+        except Exception as exc:
+            # Don't fail the save — user can resend manually
+            pass
+
+    return EmailConfigOut(
+        tenant_id=cfg.tenant_id,
+        alert_email=cfg.alert_email,
+        alert_level=cfg.alert_level,
+        is_verified=cfg.is_verified,
+        verified_at=cfg.verified_at,
+        updated_at=cfg.updated_at,
+    )
+
+
+@router.delete("/{tenant_id}/email", status_code=204)
+def delete_email_config(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    assert_tenant_access(current_user, tenant_id)
+    _get_tenant_or_404(tenant_id, db)
+    cfg = _get_email_config(tenant_id, db)
+    if cfg:
+        db.delete(cfg)
+        db.commit()
+
+
+@router.post("/{tenant_id}/email/resend-verification", response_model=VerifyEmailResponse)
+def resend_verification(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    assert_tenant_access(current_user, tenant_id)
+    tenant = _get_tenant_or_404(tenant_id, db)
+    cfg = _get_email_config(tenant_id, db)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="No email address configured")
+    if cfg.is_verified:
+        return VerifyEmailResponse(success=True, message="Email is already verified")
+
+    now = datetime.now(timezone.utc)
+    cfg.verification_token = secrets.token_urlsafe(32)
+    cfg.token_expires_at = now + timedelta(hours=24)
+    cfg.updated_at = now
+    db.commit()
+
+    try:
+        send_verification_email(cfg.alert_email, cfg.verification_token, tenant.name)
+        return VerifyEmailResponse(success=True, message=f"Verification email sent to {cfg.alert_email}")
+    except Exception as exc:
+        return VerifyEmailResponse(success=False, message=f"Failed to send email: {exc}")
+
+
+# Public — no auth — token is the credential
+@router.get("/email/verify", response_model=VerifyEmailResponse)
+def verify_email_token(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    cfg = db.query(EmailAlertConfig).filter(
+        EmailAlertConfig.verification_token == token,
+    ).first()
+
+    if not cfg:
+        return VerifyEmailResponse(success=False, message="Invalid or already-used verification link")
+
+    now = datetime.now(timezone.utc)
+    if cfg.token_expires_at and cfg.token_expires_at.replace(tzinfo=timezone.utc) < now:
+        return VerifyEmailResponse(success=False, message="Verification link has expired — please request a new one")
+
+    cfg.is_verified = True
+    cfg.verified_at = now
+    cfg.verification_token = None
+    cfg.token_expires_at = None
+    cfg.updated_at = now
+    db.commit()
+
+    return VerifyEmailResponse(success=True, message=f"Email verified — alerts will be sent to {cfg.alert_email}")
