@@ -1,17 +1,20 @@
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.email_alert_config import EmailAlertConfig
 from app.models.stripe_connection import MAX_CONNECTIONS_PER_TENANT, StripeConnection
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
 from app.routers.auth import CurrentUser, assert_tenant_access, get_current_user
 from app.services.crypto import decrypt_key, encrypt_key
+from app.services.email_service import send_verification_email
 from app.services.slack_notifier import VALID_LEVELS, send_test_message
 
 router = APIRouter()
