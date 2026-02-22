@@ -37,6 +37,7 @@ from app.database import SessionLocal, init_db
 from app.models.alert import AnomalyAlert
 from app.models.daily_revenue import DailyRevenueMetrics
 from app.models.raw_balance_transaction import RawBalanceTransaction
+from app.models.stripe_connection import StripeConnection
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.routers.auth import hash_password
@@ -347,13 +348,55 @@ def aggregate_daily_metrics(
 
 # -- Step 4: Detection run -----------------------------------------------------
 
-def run_detection(db, tenant_id: int, detection_days: int = 14) -> list[AnomalyAlert]:
-    """
-    Run anomaly detection over the last N days of daily_revenue_metrics.
-    Uses the existing alert_service pipeline (which we'll upgrade in Phase 3).
-    """
+def run_detection(
+    db,
+    tenant_id: int,
+    stripe_account_id: str,
+    detection_days: int = 14,
+) -> list[AnomalyAlert]:
+    """Run anomaly detection over the last N days for a specific account."""
     from app.services.alert_service import run_detection_pipeline
-    return run_detection_pipeline(db, tenant_id, detection_days=detection_days)
+    return run_detection_pipeline(
+        db, tenant_id,
+        detection_days=detection_days,
+        stripe_account_id=stripe_account_id,
+    )
+
+
+# -- Step 5: Demo Stripe connection --------------------------------------------
+
+def ensure_stripe_connection(db, tenant_id: int, name: str, stripe_account_id: str) -> StripeConnection:
+    """
+    Create a demo StripeConnection row so the profile page and dashboard
+    dropdown are populated without a real API key.
+    The encrypted_api_key is left NULL — the connection is pre-marked with
+    stripe_account_id so data filtering works immediately.
+    """
+    existing = (
+        db.query(StripeConnection)
+        .filter(
+            StripeConnection.tenant_id == tenant_id,
+            StripeConnection.stripe_account_id == stripe_account_id,
+        )
+        .first()
+    )
+    if existing:
+        print(f"  [=] StripeConnection exists: {name} ({stripe_account_id})")
+        return existing
+
+    conn = StripeConnection(
+        tenant_id=tenant_id,
+        name=name,
+        encrypted_api_key=None,   # no real key for demo
+        stripe_account_id=stripe_account_id,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(conn)
+    db.commit()
+    db.refresh(conn)
+    print(f"  [+] Created StripeConnection: {name} ({stripe_account_id})")
+    return conn
 
 
 # -- Reporting -----------------------------------------------------------------
@@ -475,15 +518,23 @@ def main():
             print(f"\n  Last 10 days of daily_revenue_metrics:")
             print_feature_summary(db, tenant.id, cfg["stripe_account_id"], days=10)
 
-            # -- 5. Run detection ----------------------------------------------
+            # -- 5. Demo StripeConnection row ----------------------------------
+            print(f"\n  [CONNECTIONS] Creating demo Stripe connection ...")
+            ensure_stripe_connection(
+                db, tenant.id,
+                name=f"{cfg['name']} (Demo)",
+                stripe_account_id=cfg["stripe_account_id"],
+            )
+
+            # -- 6. Run detection ----------------------------------------------
             print(f"\n  [DETECTION] Running anomaly detection (last 14 days) ...")
-            # NOTE: alert_service currently reads from KPISnapshot (old model).
-            # In Phase 3 we migrate it to read from DailyRevenueMetrics.
-            # For Phase 1, we skip detection to avoid schema mismatch.
-            # Uncomment the line below once Phase 3 is complete:
-            # alerts = run_detection(db, tenant.id, detection_days=14)
-            print("  Detection skipped (Phase 3 will wire this to the new feature table).")
-            print(f"  Raw + feature layers are fully populated and ready for inspection.")
+            alerts = run_detection(
+                db, tenant.id,
+                stripe_account_id=cfg["stripe_account_id"],
+                detection_days=14,
+            )
+            print(f"  Generated {len(alerts)} alert(s).")
+            print_alert_summary(alerts)
 
         print(f"\n{'='*60}")
         print("  Seed complete. Start the API:")

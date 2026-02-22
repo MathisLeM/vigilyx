@@ -103,6 +103,7 @@ def list_snapshots(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     currency: str = "usd",
+    stripe_account_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -117,6 +118,8 @@ def list_snapshots(
         DailyRevenueMetrics.tenant_id == tenant_id,
         DailyRevenueMetrics.currency == currency,
     )
+    if stripe_account_id:
+        query = query.filter(DailyRevenueMetrics.stripe_account_id == stripe_account_id)
     if start_date:
         query = query.filter(DailyRevenueMetrics.snapshot_date >= start_date)
     if end_date:

@@ -36,6 +36,7 @@ frontend/next-env.d.ts
 
 # ── ML model artifacts (regenerate with: python scripts/train_base_model.py) ──
 models/*.pkl
+models/*.json
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
