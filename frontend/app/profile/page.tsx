@@ -2,8 +2,9 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useState, FormEvent, Suspense } from "react";
 import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import { useAuth } from "@/lib/auth";
 import {
@@ -41,8 +42,6 @@ import {
 } from "@/lib/api";
 import NavSidebar from "@/components/NavSidebar";
 
-import { useSearchParams } from "next/navigation";
-
 type TestStatus = "idle" | "loading" | "success" | "error";
 
 const ALERT_LEVELS: { value: SlackAlertLevel; label: string; description: string }[] = [
@@ -59,10 +58,33 @@ const LEVEL_LABELS: Record<string, string> = {
 
 const MAX_CONNECTIONS = 5;
 
+// Isolated component so useSearchParams is inside a Suspense boundary
+function EmailTokenVerifier({
+  onVerified,
+  tenantId,
+  setEmailConfig,
+}: {
+  onVerified: (r: { success: boolean; message: string }) => void;
+  tenantId: number | null;
+  setEmailConfig: (c: import("@/lib/api").EmailConfig | null) => void;
+}) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  useEffect(() => {
+    const token = searchParams?.get("email_token");
+    if (!token) return;
+    router.replace("/profile", { scroll: false });
+    verifyEmailToken(token).then((res) => {
+      onVerified(res);
+      if (tenantId) fetchEmailConfig(tenantId).then(setEmailConfig).catch(console.error);
+    });
+  }, [searchParams, router, onVerified, tenantId, setEmailConfig]);
+  return null;
+}
+
 export default function ProfilePage() {
   const { isAuthenticated, tenantId, email, isAdmin } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   // ── Stripe connections ─────────────────────────────────────────────────────
   const [connections, setConnections] = useState<StripeConnection[]>([]);
@@ -135,19 +157,6 @@ export default function ProfilePage() {
     listInvitations(tenantId).then(setInvitations).catch(console.error);
   }, [isAuthenticated, tenantId]);
 
-  // Handle ?email_token=<token> — verify on mount
-  useEffect(() => {
-    const token = searchParams?.get("email_token");
-    if (!token) return;
-    // Clean the URL immediately
-    router.replace("/profile", { scroll: false });
-    verifyEmailToken(token).then((res) => {
-      setEmailVerifyBanner(res);
-      // Refresh email config to show verified state
-      if (tenantId) fetchEmailConfig(tenantId).then(setEmailConfig).catch(console.error);
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // ── Stripe connection handlers ─────────────────────────────────────────────
 
@@ -374,6 +383,13 @@ export default function ProfilePage() {
 
   return (
     <div className="flex min-h-screen">
+      <Suspense fallback={null}>
+        <EmailTokenVerifier
+          onVerified={setEmailVerifyBanner}
+          tenantId={tenantId}
+          setEmailConfig={setEmailConfig}
+        />
+      </Suspense>
       <NavSidebar />
 
       <main className="flex-1 overflow-auto p-8 max-w-2xl space-y-8">
