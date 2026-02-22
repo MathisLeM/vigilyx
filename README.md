@@ -1,27 +1,29 @@
 # Vigilyx
 
-Proactive anomaly detection for Stripe revenue metrics. Vigilyx pulls your transaction data from Stripe, computes daily KPI snapshots, and automatically surfaces anomalies (revenue spikes, drops, refund surges, chargeback patterns) using MAD and Z-score detectors — grouped by day with AI-style combo analysis.
+Proactive anomaly detection for Stripe revenue metrics. Vigilyx pulls your transaction data from Stripe, computes daily KPI snapshots, and automatically surfaces anomalies (revenue spikes, drops, refund surges, chargeback patterns) using MAD + Z-score detectors gated by a per-account Isolation Forest — grouped by day with AI-style combo analysis.
 
 ## Architecture
 
 ```
 vigilyx/
 ├── app/                    # FastAPI backend
-│   ├── models/             # SQLAlchemy models (tenants, alerts, metrics, ...)
+│   ├── models/             # SQLAlchemy models (tenants, alerts, metrics, stripe_connections, ...)
 │   ├── routers/            # API endpoints (auth, alerts, metrics, config, ingestion)
 │   ├── services/
-│   │   ├── detection/      # MAD + Z-score anomaly detectors
+│   │   ├── detection/      # MAD + Z-score detectors + Isolation Forest gating layer
 │   │   └── ingestion/      # Stripe data ingestion pipeline
 │   ├── config.py           # Environment settings (pydantic-settings)
 │   ├── database.py         # SQLAlchemy engine + session
-│   └── scheduler.py        # APScheduler: hourly ingestion + daily detection
+│   └── scheduler.py        # APScheduler: ingestion + detection + nightly model retraining
 ├── frontend/               # Next.js 14 (App Router) dashboard
 │   ├── app/
-│   │   ├── dashboard/      # Main KPI + alerts view
-│   │   ├── profile/        # Stripe key config + ingestion trigger
+│   │   ├── dashboard/      # Main KPI + alerts view, per-account filtering
+│   │   ├── profile/        # Stripe connections, ingestion, Slack, AI model, team
 │   │   └── login/
 │   ├── components/         # KPICards, KPIChart, AlertsTable, NavSidebar
 │   └── lib/                # api.ts (typed fetch wrappers), auth.tsx (JWT context)
+├── models/                 # Trained model artifacts (.pkl) — gitignored, regenerate locally
+├── scripts/                # train_base_model.py — trains the synthetic base IF model
 ├── simulation/             # seed_demo.py — seeds DB with simulated Stripe data
 ├── data_contracts/         # Stripe-aligned Pydantic schemas
 ├── .env.example            # Required environment variables
@@ -39,16 +41,20 @@ vigilyx/
 ### 1. Clone and configure environment
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/vigilyx.git
+git clone https://github.com/MathisLeM/vigilyx.git
 cd vigilyx
 
 cp .env.example .env
-# Edit .env and set a strong SECRET_KEY
+# Edit .env — set SECRET_KEY and FERNET_KEY (see below)
 ```
 
-Generate a secure `SECRET_KEY`:
+Generate required secrets:
 ```bash
+# SECRET_KEY (JWT signing)
 python -c "import secrets; print(secrets.token_hex(32))"
+
+# FERNET_KEY (encrypts Stripe API keys at rest)
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 ### 2. Install backend dependencies
@@ -57,9 +63,17 @@ python -c "import secrets; print(secrets.token_hex(32))"
 pip install -r requirements.txt
 ```
 
-### 3. Seed the database with demo data
+### 3. Train the base Isolation Forest model
 
-This creates two demo tenants (Acme Corp, Globex Inc) with ~90 days of simulated Stripe-like revenue data and runs initial anomaly detection.
+The base model is a synthetic fallback used before enough real data is collected (< 30 days per account).
+
+```bash
+python scripts/train_base_model.py
+```
+
+### 4. Seed the database with demo data
+
+Creates two demo tenants with ~90 days of simulated Stripe-like revenue data, demo Stripe connections, and initial anomaly detection.
 
 ```bash
 python simulation/seed_demo.py
@@ -69,10 +83,10 @@ Demo accounts created:
 | Email | Password | Role |
 |-------|----------|------|
 | `admin@demo.com` | `admin1234` | Admin (sees all tenants) |
-| `acme@demo.com` | `demo1234` | Acme Corp |
-| `globex@demo.com` | `demo1234` | Globex Inc |
+| `acme@demo.com` | `demo1234` | Acme SaaS |
+| `globex@demo.com` | `demo1234` | Globex Commerce |
 
-### 4. Start the backend
+### 5. Start the backend
 
 ```bash
 uvicorn main:app --reload
@@ -81,7 +95,7 @@ uvicorn main:app --reload
 API available at: `http://localhost:8000`
 Swagger docs: `http://localhost:8000/docs`
 
-### 5. Configure the frontend
+### 6. Configure the frontend
 
 ```bash
 cd frontend
@@ -95,19 +109,24 @@ Dashboard available at: `http://localhost:3000`
 ## Using with Real Stripe Data
 
 1. Log in as a company account (not admin)
-2. Go to **Profile** → paste your Stripe secret key (`sk_live_...` or `sk_test_...`)
-3. Click **Test connection** to verify
-4. Click **Sync (incremental)** to pull transaction data
+2. Go to **Profile → Stripe Connections** → add a connection (name + secret key)
+3. Click **Test** to verify the key and link the Stripe account ID
+4. Go to **Profile → Data Ingestion** → click **Sync** to pull transaction history
 5. Go back to **Dashboard** → click **Run Detection** to generate alerts
+6. Once you have 30+ days of data, go to **Profile → AI Model** → click **Train model**
 
-The scheduler also runs ingestion and detection automatically every 24 hours.
+The scheduler runs ingestion and detection automatically every hour, and retrains models nightly at 03:00 UTC.
 
 ## Key Features
 
 - **Multi-tenant**: Each company sees only its own data
+- **Multi-Stripe-account**: Each tenant can connect up to 5 Stripe accounts; all data and alerts are scoped per account
+- **Isolation Forest gating**: MAD + Z-score anomalies are confirmed by a per-account IF model before being persisted — reduces false positives. Falls back to a pre-trained synthetic base model until 30 days of real data are available
 - **Dual-confirmation alerts**: When both MAD and Z-score fire on the same metric, a single `DUAL` alert is created with bumped severity
 - **Daily grouping**: Alerts are grouped by date with a combo-hint engine that identifies patterns (outage, fraud wave, billing error, enterprise deal, etc.)
 - **Accordion UI**: Click a day row to expand all anomalies with per-metric explanations
+- **Slack notifications**: Configurable severity filter (HIGH / Med+High / All)
+- **Team invitations**: Invite teammates by email; they join your tenant directly
 
 ## Roadmap
 
@@ -122,13 +141,15 @@ The scheduler also runs ingestion and detection automatically every 24 hours.
 - [ ] Deploy (Neon + EC2 + Vercel)
 
 **ML model layer** *(hosted inline in FastAPI — requires ≥ 1 GB RAM server)*
-- [ ] Isolation Forest detector — unsupervised anomaly scoring per metric, replaces/augments MAD+Z-score
-- [ ] Per-tenant model training pipeline — scheduled via APScheduler after ingestion
+- [x] Isolation Forest detector — unsupervised anomaly gating per account, augments MAD+Z-score
+- [x] Per-account model training pipeline — scheduled nightly via APScheduler; base synthetic model as fallback
 - [ ] LSTM forecasting — predict next-day metric values, alert when actual deviates from forecast
 - [ ] Model artifact storage — serialized models (.pkl / .pt) persisted to S3/R2 or local volume
 - [ ] Model versioning — track which model version produced each alert
 
 **Platform**
+- [x] Multi-Stripe-account per tenant (up to 5 connections, per-account data isolation)
+- [x] Team invitations (invite by email, role-based access)
 - [ ] Multi-currency support (EUR, GBP normalisation)
 - [ ] CSV / PDF export of alerts and KPI snapshots
 - [ ] Tenant self-registration flow (no manual DB seeding)
@@ -145,7 +166,7 @@ The scheduler also runs ingestion and detection automatically every 24 hours.
 
 ## Tech Stack
 
-**Backend**: FastAPI · SQLAlchemy · Alembic · APScheduler · pandas · scikit-learn · stripe-python · python-jose
+**Backend**: FastAPI · SQLAlchemy · Alembic · APScheduler · pandas · scikit-learn · stripe-python · python-jose · cryptography
 **Frontend**: Next.js 14 · Tailwind CSS · Recharts · date-fns
 **Database**: SQLite (local) → PostgreSQL (production)
-**ML**: scikit-learn (Isolation Forest) · PyTorch (LSTM) — served inline in FastAPI
+**ML**: scikit-learn (Isolation Forest) · PyTorch (LSTM, planned) — served inline in FastAPI
