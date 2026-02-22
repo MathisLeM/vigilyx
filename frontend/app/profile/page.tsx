@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO } from "date-fns";
