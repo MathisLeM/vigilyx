@@ -1,7 +1,11 @@
+import logging
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # SQLite requires check_same_thread=False for multi-threaded use.
 # PostgreSQL does not need it — pass only for SQLite.
@@ -59,4 +63,11 @@ def init_db():
         # alembic.ini lives at the project root (one level up from app/)
         ini_path = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
         alembic_cfg = Config(os.path.abspath(ini_path))
-        command.upgrade(alembic_cfg, "head")
+        alembic_cfg.attributes["skip_logging_config"] = True
+        try:
+            logger.info("Running Alembic migrations (DATABASE_URL prefix: %s)", settings.DATABASE_URL[:20])
+            command.upgrade(alembic_cfg, "head")
+            logger.info("Alembic migrations complete")
+        except Exception as exc:
+            logger.error("Alembic migration FAILED: %s", exc, exc_info=True)
+            raise
