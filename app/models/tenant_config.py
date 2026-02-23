@@ -12,9 +12,6 @@ class TenantConfig(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), unique=True, nullable=False)
 
-    # Stripe — stored Fernet-encrypted
-    stripe_api_key = Column(String(255), nullable=True)
-
     # Slack — webhook URL stored Fernet-encrypted
     # alert_level: "HIGH" | "MEDIUM_AND_HIGH" | "ALL"
     slack_webhook_url = Column(String(500), nullable=True)
