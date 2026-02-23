@@ -1,16 +1,19 @@
+import re
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.limiter import limiter
+from app.models.tenant import Tenant
 from app.models.user import User
 
 router = APIRouter()
@@ -103,8 +106,63 @@ class TokenOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
+
+
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.post("/signup", response_model=TokenOut)
+@limiter.limit("5/minute")
+def signup(
+    request: Request,
+    body: SignupRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Build a unique slug from the email local part
+    local = re.sub(r"[^a-z0-9]", "", body.email.split("@")[0].lower())[:20] or "user"
+    slug = f"{local}_{secrets.token_hex(3)}"
+
+    tenant = Tenant(name=local, slug=slug)
+    db.add(tenant)
+    db.commit()
+    db.refresh(tenant)
+
+    user = User(
+        email=body.email,
+        hashed_password=hash_password(body.password),
+        tenant_id=tenant.id,
+        is_admin=False,
+    )
+    db.add(user)
+    db.commit()
+
+    # Seed demo data asynchronously — user gets token immediately
+    from app.services.demo_seeder import seed_demo_for_tenant
+    background_tasks.add_task(seed_demo_for_tenant, tenant.id)
+
+    token = create_access_token({
+        "sub": str(user.id),
+        "tenant_id": tenant.id,
+        "email": user.email,
+        "is_admin": False,
+    })
+    return TokenOut(access_token=token, tenant_id=tenant.id, email=user.email, is_admin=False)
 
 
 @router.post("/login", response_model=TokenOut)

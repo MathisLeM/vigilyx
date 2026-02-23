@@ -7,7 +7,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { login as apiLogin, LoginResponse } from "./api";
+import { login as apiLogin, signup as apiSignup, LoginResponse } from "./api";
 
 interface AuthState {
   token: string | null;
@@ -18,6 +18,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
+  signup: (email: string, password: string) => Promise<void>;
   logout: () => void;
   isAuthenticated: boolean;
 }
@@ -48,8 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const data: LoginResponse = await apiLogin(email, password);
+  function storeAuth(data: LoginResponse) {
     localStorage.setItem("token", data.access_token);
     localStorage.setItem("tenantId", data.tenant_id != null ? String(data.tenant_id) : "");
     localStorage.setItem("email", data.email);
@@ -60,6 +60,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: data.email,
       isAdmin: data.is_admin,
     });
+  }
+
+  const login = useCallback(async (email: string, password: string) => {
+    const data: LoginResponse = await apiLogin(email, password);
+    storeAuth(data);
+  }, []);
+
+  const signup = useCallback(async (email: string, password: string) => {
+    const data: LoginResponse = await apiSignup(email, password);
+    storeAuth(data);
   }, []);
 
   const logout = useCallback(() => {
@@ -72,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ ...auth, login, logout, isAuthenticated: !!auth.token }}
+      value={{ ...auth, login, signup, logout, isAuthenticated: !!auth.token }}
     >
       {children}
     </AuthContext.Provider>

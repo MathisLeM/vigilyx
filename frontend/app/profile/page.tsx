@@ -93,6 +93,7 @@ export default function ProfilePage() {
   const [showAddKey, setShowAddKey] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [showAlphaModal, setShowAlphaModal] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [testResults, setTestResults] = useState<Record<number, TestResult>>({});
@@ -521,60 +522,34 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* Add connection form */}
+            {/* Alpha gate — add connection locked */}
             {connections.length < MAX_CONNECTIONS && (
-              <form onSubmit={handleAddConnection} className="space-y-3 pt-1">
+              <div className="pt-1 space-y-3">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                   Add connection
                 </p>
-                <input
-                  type="text"
-                  value={addName}
-                  onChange={(e) => setAddName(e.target.value)}
-                  placeholder="Connection name (e.g. Main account, EU store)"
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm
-                             rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                <div className="relative">
-                  <input
-                    type={showAddKey ? "text" : "password"}
-                    value={addKey}
-                    onChange={(e) => setAddKey(e.target.value)}
-                    placeholder="sk_test_••••••••••••••••••••••••"
-                    className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm
-                               font-mono rounded-lg px-4 py-2.5 pr-20
-                               focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowAddKey((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500
-                               hover:text-gray-300 transition-colors"
-                  >
-                    {showAddKey ? "Hide" : "Show"}
-                  </button>
+                <div className="flex items-start gap-3 bg-amber-950/40 border border-amber-800/50
+                                rounded-xl px-4 py-3.5">
+                  <span className="text-amber-400 text-lg mt-0.5">🔒</span>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-amber-300">Closed alpha</p>
+                    <p className="text-xs text-amber-200/70 leading-relaxed">
+                      Connecting a real Stripe account is currently invite-only.
+                      Request access and we&apos;ll unlock it for you.
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-600">
-                  Secret key starting with <span className="font-mono text-gray-400">sk_test_</span> or{" "}
-                  <span className="font-mono text-gray-400">sk_live_</span>. Never share this key.
-                </p>
-
-                {addError && (
-                  <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
-                    {addError}
-                  </p>
-                )}
-
                 <button
-                  type="submit"
-                  disabled={addSaving || !addName.trim() || !addKey.trim()}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
-                             disabled:cursor-not-allowed text-white text-sm font-semibold
-                             rounded-lg px-4 py-2.5 transition-colors"
+                  type="button"
+                  onClick={() => setShowAlphaModal(true)}
+                  className="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700
+                             text-white text-sm font-semibold rounded-lg px-4 py-2.5
+                             transition-colors flex items-center justify-center gap-2"
                 >
-                  {addSaving ? "Saving…" : "Add connection"}
+                  <span>Request Stripe access</span>
+                  <span className="text-gray-400">→</span>
                 </button>
-              </form>
+              </div>
             )}
 
             <p className="text-xs text-gray-600">
@@ -1233,6 +1208,46 @@ export default function ProfilePage() {
           </section>
         )}
       </main>
+
+      {/* Alpha gate modal */}
+      {showAlphaModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+          onClick={() => setShowAlphaModal(false)}
+        >
+          <div
+            className="bg-gray-900 border border-gray-700 rounded-2xl p-8 max-w-sm w-full space-y-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-center space-y-2">
+              <div className="text-4xl">🔒</div>
+              <h2 className="text-lg font-bold text-white">Closed alpha</h2>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Real Stripe connections are invite-only during the alpha.
+                Send us an email and we&apos;ll unlock your account within 24h.
+              </p>
+            </div>
+
+            <a
+              href={`mailto:mathis@vigilyx.io?subject=Stripe access request&body=Hi, I'd like to connect my real Stripe account to Vigilyx. My account email is: ${email}`}
+              className="flex items-center justify-center gap-2 w-full bg-indigo-600
+                         hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl
+                         px-4 py-3 transition-colors"
+            >
+              <span>✉️</span>
+              <span>Request access — mathis@vigilyx.io</span>
+            </a>
+
+            <button
+              type="button"
+              onClick={() => setShowAlphaModal(false)}
+              className="w-full text-sm text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

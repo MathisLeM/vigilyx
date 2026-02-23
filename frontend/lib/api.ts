@@ -50,6 +50,19 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return res.json();
 }
 
+export async function signup(email: string, password: string): Promise<LoginResponse> {
+  const res = await fetch(`${API}/auth/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Signup failed" }));
+    throw new Error(err.detail ?? "Signup failed");
+  }
+  return res.json();
+}
+
 // ── Tenants ───────────────────────────────────────────────────────────────
 
 export interface Tenant {
