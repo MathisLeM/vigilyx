@@ -48,6 +48,11 @@ export default function DashboardPage() {
   const [detecting, setDetecting] = useState(false);
   const [detectionMsg, setDetectionMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Retry counter: auto-refetch when snapshots are empty (demo seeder still running after signup)
+  const [seedingRetry, setSeedingRetry] = useState(0);
+  const SEEDING_MAX_RETRIES = 5;
+  const SEEDING_RETRY_DELAY_MS = 4000;
 
   useEffect(() => {
     if (!isAuthenticated) router.replace("/login");
@@ -86,6 +91,7 @@ export default function DashboardPage() {
   const loadData = useCallback(async () => {
     if (!activeTenantId) return;
     setLoading(true);
+    setLoadError(null);
     try {
       const [snaps, unres, res] = await Promise.all([
         fetchSnapshots(activeTenantId, startDate, endDate, selectedStripeAccountId),
@@ -96,7 +102,7 @@ export default function DashboardPage() {
       setUnresolved(unres);
       setResolved(res);
     } catch (e) {
-      console.error(e);
+      setLoadError(e instanceof Error ? e.message : "Failed to load dashboard data");
     } finally {
       setLoading(false);
     }
@@ -105,6 +111,17 @@ export default function DashboardPage() {
   useEffect(() => {
     if (isAuthenticated && activeTenantId) loadData();
   }, [isAuthenticated, loadData, activeTenantId]);
+
+  // Auto-retry when snapshots are empty after load — demo seeder may still be running
+  useEffect(() => {
+    if (loading || loadError || snapshots.length > 0) return;
+    if (seedingRetry >= SEEDING_MAX_RETRIES) return;
+    const timer = setTimeout(() => {
+      setSeedingRetry((n) => n + 1);
+      loadData();
+    }, SEEDING_RETRY_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [loading, loadError, snapshots.length, seedingRetry, loadData]);
 
   async function handleDetect() {
     if (!activeTenantId) return;
@@ -284,6 +301,19 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+
+        {loadError && (
+          <div className="rounded-xl bg-red-950 border border-red-800 px-5 py-4 text-sm text-red-400">
+            Could not load dashboard data — {loadError}
+          </div>
+        )}
+
+        {!loading && !loadError && snapshots.length === 0 && seedingRetry < SEEDING_MAX_RETRIES && (
+          <div className="flex items-center gap-3 rounded-xl bg-gray-900 border border-gray-800 px-5 py-4">
+            <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shrink-0" />
+            <p className="text-sm text-gray-400">Setting up your demo workspace… this takes a few seconds.</p>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-24">
