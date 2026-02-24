@@ -21,7 +21,7 @@ vigilyx/
 │   │   ├── profile/        # Stripe connections, ingestion, Slack, AI model, team
 │   │   └── login/
 │   ├── components/         # KPICards, KPIChart, AlertsTable, NavSidebar
-│   └── lib/                # api.ts (typed fetch wrappers), auth.tsx (JWT context)
+│   └── lib/                # api.ts (typed fetch wrappers), auth.tsx (cookie-based auth)
 ├── models/                 # Trained model artifacts (.pkl) — gitignored, regenerate locally
 ├── scripts/                # train_base_model.py — trains the synthetic base IF model
 ├── simulation/             # seed_demo.py — seeds DB with simulated Stripe data
@@ -137,6 +137,8 @@ The scheduler runs ingestion and detection automatically every hour, and retrain
 - [x] CORS + SECRET_KEY locked down for production domain
 - [x] Rate limiting on login (brute-force protection)
 - [x] API docs disabled in production
+- [x] httpOnly cookie auth — session tokens invisible to JavaScript (XSS-proof)
+- [x] Invitation tokens secured — raw token returned only at creation, never in list endpoint
 - [ ] Email alerting
 - [ ] Deploy (Neon + EC2 + Vercel)
 
