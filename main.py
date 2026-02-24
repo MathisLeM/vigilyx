@@ -1,4 +1,5 @@
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,6 +12,7 @@ from app.database import init_db
 from app.limiter import limiter
 from app.routers import alerts, auth, config, ingestion, invitations, metrics, tenants
 from app.scheduler import start_scheduler, stop_scheduler
+from app.services.first_run import seed_if_first_run
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,6 +42,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Development mode (ENVIRONMENT=%s)", settings.ENVIRONMENT)
     init_db()
+    threading.Thread(target=seed_if_first_run, daemon=True).start()
     start_scheduler()
     yield
     stop_scheduler()
