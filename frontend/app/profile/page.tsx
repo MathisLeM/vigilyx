@@ -394,7 +394,7 @@ export default function ProfilePage() {
       </Suspense>
       <NavSidebar />
 
-      <main className="flex-1 overflow-auto p-8 max-w-2xl space-y-8">
+      <main className="flex-1 overflow-auto p-8 space-y-8">
         <h1 className="text-2xl font-bold text-white">Profile & Settings</h1>
 
         {/* ── Section 1: Account Info ── */}
@@ -417,15 +417,103 @@ export default function ProfilePage() {
                 "Member"
               )}
             </span>
-
-            <span className="text-gray-500">Tenant ID</span>
-            <span className="text-white font-mono text-xs">
-              {tenantId ?? <span className="text-gray-500">N/A (admin)</span>}
-            </span>
           </div>
         </section>
 
-        {/* ── Section 2: Stripe Connections ── */}
+        {/* ── Section 2: Team ── */}
+        {!isAdmin && (
+          <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
+            <h2 className="text-base font-semibold text-gray-200">Team</h2>
+            <p className="text-sm text-gray-500">
+              Invite coworkers to join your company account. They will receive a one-time link to set a password.
+            </p>
+
+            <form onSubmit={handleSendInvite} className="flex gap-3">
+              <input
+                type="email"
+                placeholder="colleague@company.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                required
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5
+                           text-sm text-white placeholder-gray-500
+                           focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+              <button
+                type="submit"
+                disabled={sendingInvite || !inviteEmail.trim()}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
+                           disabled:cursor-not-allowed text-white text-sm font-semibold
+                           rounded-lg px-4 py-2.5 transition-colors whitespace-nowrap"
+              >
+                {sendingInvite ? "Sending…" : "Send invite"}
+              </button>
+            </form>
+
+            {inviteError && (
+              <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
+                {inviteError}
+              </p>
+            )}
+
+            {lastInviteToken && (
+              <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 space-y-2">
+                <p className="text-xs text-gray-400 font-medium">Invite link (valid 7 days)</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs text-indigo-300 break-all font-mono">
+                    {typeof window !== "undefined"
+                      ? `${window.location.origin}/invite/accept?token=${lastInviteToken}`
+                      : `/invite/accept?token=${lastInviteToken}`}
+                  </code>
+                  <button
+                    onClick={() => {
+                      const url = `${window.location.origin}/invite/accept?token=${lastInviteToken}`;
+                      navigator.clipboard.writeText(url);
+                    }}
+                    className="shrink-0 text-xs text-gray-400 hover:text-white border border-gray-700
+                               hover:border-gray-500 rounded px-2 py-1 transition-colors"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {invitations.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pending invitations</p>
+                {invitations.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="flex items-center justify-between bg-gray-800 border border-gray-700
+                               rounded-lg px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm text-white truncate">{inv.email}</p>
+                      <p className="text-xs text-gray-500">
+                        Expires {format(parseISO(inv.expires_at), "MMM d, yyyy")}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRevoke(inv.id)}
+                      disabled={revokingId === inv.id}
+                      className="shrink-0 ml-4 text-xs text-red-400 hover:text-red-300
+                                 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {revokingId === inv.id ? "Revoking…" : "Revoke"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {invitations.length === 0 && (
+              <p className="text-xs text-gray-600">No pending invitations.</p>
+            )}
+          </section>
+        )}
+
+        {/* ── Section 3: Stripe Connections ── */}
         {isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
             <p className="text-sm text-gray-500">
@@ -560,7 +648,7 @@ export default function ProfilePage() {
           </section>
         )}
 
-        {/* ── Section 3: Data Ingestion ── */}
+        {/* ── Section 4: Data Ingestion ── */}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
             <h2 className="text-base font-semibold text-gray-200">Data Ingestion</h2>
@@ -674,164 +762,144 @@ export default function ProfilePage() {
           </section>
         )}
 
-        {/* ── Section 4: Email Alerts ── */}
+        {/* ── Section 5: AI Model ── */}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-gray-200">Email Alerts</h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Receive an email whenever anomalies are detected.
-                </p>
-              </div>
-              {emailConfig !== undefined && (
-                <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
-                  emailConfig?.is_verified
-                    ? "bg-emerald-950 text-emerald-400 border-emerald-800"
-                    : emailConfig
-                    ? "bg-amber-950 text-amber-400 border-amber-800"
-                    : "bg-gray-800 text-gray-500 border-gray-700"
-                }`}>
-                  {emailConfig?.is_verified
-                    ? "● Verified"
-                    : emailConfig
-                    ? "○ Pending verification"
-                    : "○ Not configured"}
-                </span>
-              )}
+            <div>
+              <h2 className="text-base font-semibold text-gray-200">AI Model</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Train a personalized Isolation Forest per Stripe account. Requires 30+ days of ingested data.
+                The scheduler retrains automatically every night at 03:00 UTC.
+              </p>
             </div>
 
-            {/* Verification banner (from link click or resend) */}
-            {emailVerifyBanner && (
-              <div className={`rounded-lg px-4 py-3 text-sm flex items-start justify-between gap-3 ${
-                emailVerifyBanner.success
-                  ? "bg-emerald-950 border border-emerald-800 text-emerald-300"
-                  : "bg-red-950 border border-red-800 text-red-400"
-              }`}>
-                <span>{emailVerifyBanner.success ? "✓ " : "✕ "}{emailVerifyBanner.message}</span>
-                <button
-                  onClick={() => setEmailVerifyBanner(null)}
-                  className="shrink-0 text-xs opacity-60 hover:opacity-100"
-                >
-                  ✕
-                </button>
-              </div>
+            {connections.length === 0 && (
+              <p className="text-sm text-gray-600">
+                Add and test a Stripe connection to enable AI model training.
+              </p>
             )}
 
-            {/* Current config card */}
-            {emailConfig && (
-              <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-white">{emailConfig.alert_email}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      Alert level:{" "}
-                      <span className="text-gray-300">
-                        {LEVEL_LABELS[emailConfig.alert_level] ?? emailConfig.alert_level}
-                      </span>
-                    </p>
-                    {emailConfig.is_verified && emailConfig.verified_at && (
-                      <p className="text-xs text-gray-600 mt-0.5">
-                        Verified {format(parseISO(emailConfig.verified_at), "MMM d, yyyy 'at' HH:mm")}
-                      </p>
-                    )}
+            {modelStatuses.map((ms) => {
+              const isTraining = trainingId === ms.connection_id;
+              const result = trainResults[ms.connection_id];
+              const error = trainErrors[ms.connection_id];
+              const canTrain = ms.has_enough_data && !!ms.stripe_account_id;
+
+              return (
+                <div
+                  key={ms.connection_id}
+                  className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-4"
+                >
+                  {/* Header */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{ms.connection_name}</p>
+                      {ms.stripe_account_id && (
+                        <p className="text-xs font-mono text-gray-500">{ms.stripe_account_id}</p>
+                      )}
+                    </div>
+                    <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                      ms.has_model
+                        ? "bg-indigo-950 text-indigo-300 border-indigo-700"
+                        : "bg-gray-700 text-gray-400 border-gray-600"
+                    }`}>
+                      {ms.has_model ? "Custom model" : "Base model"}
+                    </span>
                   </div>
+
+                  {ms.stripe_account_id ? (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                        Data available
+                      </p>
+                      <div className="grid grid-cols-[140px_1fr] gap-y-1 text-xs">
+                        <span className="text-gray-500">Daily snapshots</span>
+                        <span className="text-gray-300 font-mono">{ms.days_available}</span>
+                        <span className="text-gray-500">Date range</span>
+                        <span className="text-gray-300">
+                          {ms.first_date && ms.last_date
+                            ? `${ms.first_date} → ${ms.last_date}`
+                            : <span className="text-gray-600">No data yet</span>}
+                        </span>
+                        <span className="text-gray-500">Threshold</span>
+                        <span className={ms.has_enough_data ? "text-emerald-400" : "text-amber-400"}>
+                          {ms.has_enough_data
+                            ? `✓ Ready (${ms.days_available}/30 days)`
+                            : `✗ Need more data (${ms.days_available}/30 days)`}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-600">
+                      Test this connection first to discover the Stripe account ID.
+                    </p>
+                  )}
+
+                  {ms.has_model && ms.trained_at && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Model</p>
+                      <p className="text-xs text-gray-400">
+                        Trained {format(parseISO(ms.trained_at), "MMM d, yyyy 'at' HH:mm")}
+                      </p>
+                    </div>
+                  )}
+
+                  {result && (
+                    <div className={`rounded-lg px-3 py-2 text-xs space-y-1 ${
+                      result.status === "trained"
+                        ? "bg-indigo-950 border border-indigo-800"
+                        : "bg-amber-950 border border-amber-800"
+                    }`}>
+                      {result.status === "trained" ? (
+                        <>
+                          <p className="text-indigo-300 font-semibold">Model trained successfully</p>
+                          {result.trained_at && (
+                            <p className="text-gray-400">
+                              {format(parseISO(result.trained_at), "MMM d, yyyy 'at' HH:mm")}
+                              {" · "}{result.days_available} day{result.days_available !== 1 ? "s" : ""} of data
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-amber-300">
+                          Not enough data — {result.days_available}/30 days available
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {error && (
+                    <p className="text-xs text-red-400 bg-red-950 border border-red-800 rounded-lg px-3 py-2">
+                      {error}
+                    </p>
+                  )}
+
                   <button
-                    onClick={handleDeleteEmail}
-                    disabled={deletingEmail}
-                    className="shrink-0 text-xs text-red-400 hover:text-red-300 border border-red-800
-                               hover:bg-red-950 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                    onClick={() => handleTrain(ms.connection_id)}
+                    disabled={isTraining || !canTrain}
+                    title={!ms.stripe_account_id
+                      ? "Test connection first"
+                      : !ms.has_enough_data
+                      ? `Need ${30 - ms.days_available} more days of data`
+                      : undefined}
+                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40
+                               disabled:cursor-not-allowed text-white text-sm font-semibold
+                               rounded-lg px-4 py-2.5 transition-colors"
                   >
-                    {deletingEmail ? "Removing…" : "Remove"}
+                    {isTraining ? "Training…" : ms.has_model ? "Retrain model" : "Train model"}
                   </button>
                 </div>
-                {!emailConfig.is_verified && (
-                  <div className="border-t border-gray-700 pt-3 flex items-center gap-3">
-                    <p className="text-xs text-amber-400 flex-1">
-                      Check your inbox for a confirmation link.
-                    </p>
-                    <button
-                      onClick={handleResendVerification}
-                      disabled={resendingVerification}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600
-                                 text-gray-200 transition-colors disabled:opacity-50"
-                    >
-                      {resendingVerification ? "Sending…" : "Resend"}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Add / update form */}
-            <form onSubmit={handleSaveEmail} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
-                  {emailConfig ? "Update email address" : "Email address"}
-                </label>
-                <input
-                  type="email"
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="alerts@yourcompany.com"
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm
-                             rounded-lg px-4 py-2.5
-                             focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-                  Alert level
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {ALERT_LEVELS.map(({ value, label, description }) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setEmailLevel(value as EmailAlertLevel)}
-                      className={`text-center px-3 py-3 rounded-xl border text-sm transition-colors ${
-                        emailLevel === value
-                          ? "bg-indigo-900 border-indigo-600 text-indigo-200"
-                          : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300"
-                      }`}
-                    >
-                      <div className="font-semibold">{label}</div>
-                      <div className="text-xs mt-0.5 opacity-60">{description}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {emailSaveError && (
-                <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
-                  {emailSaveError}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                disabled={savingEmail || !emailInput.trim()}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
-                           disabled:cursor-not-allowed text-white text-sm font-semibold
-                           rounded-lg px-4 py-2.5 transition-colors"
-              >
-                {savingEmail
-                  ? "Saving…"
-                  : emailConfig
-                  ? "Update email"
-                  : "Save email address"}
-              </button>
-            </form>
+              );
+            })}
 
             <p className="text-xs text-gray-600">
-              A confirmation link will be sent to the address. Alerts fire automatically
-              after each detection run once the address is verified.
+              The custom model learns your account's specific patterns (seasonality, volume, fee profile)
+              and replaces the generic base model for anomaly detection on this account.
             </p>
           </section>
         )}
 
-        {/* ── Section 5: Slack Alerts (was Section 4) ── */}
+        {/* ── Section 6: Slack Alerts ── */}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
             <div className="flex items-center justify-between">
@@ -968,244 +1036,153 @@ export default function ProfilePage() {
           </section>
         )}
 
-        {/* ── Section 6: AI Model ── */}
+        {/* ── Section 7: Email Alerts ── */}
         {!isAdmin && (
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
-            <div>
-              <h2 className="text-base font-semibold text-gray-200">AI Model</h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Train a personalized Isolation Forest per Stripe account. Requires 30+ days of ingested data.
-                The scheduler retrains automatically every night at 03:00 UTC.
-              </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-200">Email Alerts</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Receive an email whenever anomalies are detected.
+                </p>
+              </div>
+              {emailConfig !== undefined && (
+                <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${
+                  emailConfig?.is_verified
+                    ? "bg-emerald-950 text-emerald-400 border-emerald-800"
+                    : emailConfig
+                    ? "bg-amber-950 text-amber-400 border-amber-800"
+                    : "bg-gray-800 text-gray-500 border-gray-700"
+                }`}>
+                  {emailConfig?.is_verified
+                    ? "● Verified"
+                    : emailConfig
+                    ? "○ Pending verification"
+                    : "○ Not configured"}
+                </span>
+              )}
             </div>
 
-            {connections.length === 0 && (
-              <p className="text-sm text-gray-600">
-                Add and test a Stripe connection to enable AI model training.
-              </p>
+            {emailVerifyBanner && (
+              <div className={`rounded-lg px-4 py-3 text-sm flex items-start justify-between gap-3 ${
+                emailVerifyBanner.success
+                  ? "bg-emerald-950 border border-emerald-800 text-emerald-300"
+                  : "bg-red-950 border border-red-800 text-red-400"
+              }`}>
+                <span>{emailVerifyBanner.success ? "✓ " : "✕ "}{emailVerifyBanner.message}</span>
+                <button
+                  onClick={() => setEmailVerifyBanner(null)}
+                  className="shrink-0 text-xs opacity-60 hover:opacity-100"
+                >
+                  ✕
+                </button>
+              </div>
             )}
 
-            {modelStatuses.map((ms) => {
-              const isTraining = trainingId === ms.connection_id;
-              const result = trainResults[ms.connection_id];
-              const error = trainErrors[ms.connection_id];
-              const canTrain = ms.has_enough_data && !!ms.stripe_account_id;
-
-              return (
-                <div
-                  key={ms.connection_id}
-                  className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-4"
-                >
-                  {/* Header */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-white">{ms.connection_name}</p>
-                      {ms.stripe_account_id && (
-                        <p className="text-xs font-mono text-gray-500">{ms.stripe_account_id}</p>
-                      )}
-                    </div>
-                    {/* Model type badge */}
-                    <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full border ${
-                      ms.has_model
-                        ? "bg-indigo-950 text-indigo-300 border-indigo-700"
-                        : "bg-gray-700 text-gray-400 border-gray-600"
-                    }`}>
-                      {ms.has_model ? "Custom model" : "Base model"}
-                    </span>
+            {emailConfig && (
+              <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">{emailConfig.alert_email}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Alert level:{" "}
+                      <span className="text-gray-300">
+                        {LEVEL_LABELS[emailConfig.alert_level] ?? emailConfig.alert_level}
+                      </span>
+                    </p>
+                    {emailConfig.is_verified && emailConfig.verified_at && (
+                      <p className="text-xs text-gray-600 mt-0.5">
+                        Verified {format(parseISO(emailConfig.verified_at), "MMM d, yyyy 'at' HH:mm")}
+                      </p>
+                    )}
                   </div>
-
-                  {/* Data availability */}
-                  {ms.stripe_account_id ? (
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                        Data available
-                      </p>
-                      <div className="grid grid-cols-[140px_1fr] gap-y-1 text-xs">
-                        <span className="text-gray-500">Daily snapshots</span>
-                        <span className="text-gray-300 font-mono">{ms.days_available}</span>
-                        <span className="text-gray-500">Date range</span>
-                        <span className="text-gray-300">
-                          {ms.first_date && ms.last_date
-                            ? `${ms.first_date} → ${ms.last_date}`
-                            : <span className="text-gray-600">No data yet</span>}
-                        </span>
-                        <span className="text-gray-500">Threshold</span>
-                        <span className={ms.has_enough_data ? "text-emerald-400" : "text-amber-400"}>
-                          {ms.has_enough_data
-                            ? `✓ Ready (${ms.days_available}/30 days)`
-                            : `✗ Need more data (${ms.days_available}/30 days)`}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-gray-600">
-                      Test this connection first to discover the Stripe account ID.
-                    </p>
-                  )}
-
-                  {/* Model info */}
-                  {ms.has_model && ms.trained_at && (
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                        Model
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        Trained {format(parseISO(ms.trained_at), "MMM d, yyyy 'at' HH:mm")}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Train / Retrain result */}
-                  {result && (
-                    <div className={`rounded-lg px-3 py-2 text-xs space-y-1 ${
-                      result.status === "trained"
-                        ? "bg-indigo-950 border border-indigo-800"
-                        : "bg-amber-950 border border-amber-800"
-                    }`}>
-                      {result.status === "trained" ? (
-                        <>
-                          <p className="text-indigo-300 font-semibold">Model trained successfully</p>
-                          {result.trained_at && (
-                            <p className="text-gray-400">
-                              {format(parseISO(result.trained_at), "MMM d, yyyy 'at' HH:mm")}
-                              {" · "}{result.days_available} day{result.days_available !== 1 ? "s" : ""} of data
-                            </p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-amber-300">
-                          Not enough data — {result.days_available}/30 days available
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {error && (
-                    <p className="text-xs text-red-400 bg-red-950 border border-red-800 rounded-lg px-3 py-2">
-                      {error}
-                    </p>
-                  )}
-
-                  {/* Train / Retrain button */}
                   <button
-                    onClick={() => handleTrain(ms.connection_id)}
-                    disabled={isTraining || !canTrain}
-                    title={!ms.stripe_account_id
-                      ? "Test connection first"
-                      : !ms.has_enough_data
-                      ? `Need ${30 - ms.days_available} more days of data`
-                      : undefined}
-                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40
-                               disabled:cursor-not-allowed text-white text-sm font-semibold
-                               rounded-lg px-4 py-2.5 transition-colors"
+                    onClick={handleDeleteEmail}
+                    disabled={deletingEmail}
+                    className="shrink-0 text-xs text-red-400 hover:text-red-300 border border-red-800
+                               hover:bg-red-950 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
                   >
-                    {isTraining
-                      ? "Training…"
-                      : ms.has_model
-                      ? "Retrain model"
-                      : "Train model"}
+                    {deletingEmail ? "Removing…" : "Remove"}
                   </button>
                 </div>
-              );
-            })}
+                {!emailConfig.is_verified && (
+                  <div className="border-t border-gray-700 pt-3 flex items-center gap-3">
+                    <p className="text-xs text-amber-400 flex-1">
+                      Check your inbox for a confirmation link.
+                    </p>
+                    <button
+                      onClick={handleResendVerification}
+                      disabled={resendingVerification}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600
+                                 text-gray-200 transition-colors disabled:opacity-50"
+                    >
+                      {resendingVerification ? "Sending…" : "Resend"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
-            <p className="text-xs text-gray-600">
-              The custom model learns your account's specific patterns (seasonality, volume, fee profile)
-              and replaces the generic base model for anomaly detection on this account.
-            </p>
-          </section>
-        )}
+            <form onSubmit={handleSaveEmail} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                  {emailConfig ? "Update email address" : "Email address"}
+                </label>
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  placeholder="alerts@yourcompany.com"
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm
+                             rounded-lg px-4 py-2.5
+                             focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
 
-        {/* ── Section 7: Team ── */}
-        {!isAdmin && (
-          <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
-            <h2 className="text-base font-semibold text-gray-200">Team</h2>
-            <p className="text-sm text-gray-500">
-              Invite coworkers to join your company account. They will receive a one-time link to set a password.
-            </p>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                  Alert level
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {ALERT_LEVELS.map(({ value, label, description }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setEmailLevel(value as EmailAlertLevel)}
+                      className={`text-center px-3 py-3 rounded-xl border text-sm transition-colors ${
+                        emailLevel === value
+                          ? "bg-indigo-900 border-indigo-600 text-indigo-200"
+                          : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300"
+                      }`}
+                    >
+                      <div className="font-semibold">{label}</div>
+                      <div className="text-xs mt-0.5 opacity-60">{description}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            <form onSubmit={handleSendInvite} className="flex gap-3">
-              <input
-                type="email"
-                placeholder="colleague@company.com"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                required
-                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5
-                           text-sm text-white placeholder-gray-500
-                           focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
+              {emailSaveError && (
+                <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
+                  {emailSaveError}
+                </p>
+              )}
+
               <button
                 type="submit"
-                disabled={sendingInvite || !inviteEmail.trim()}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
+                disabled={savingEmail || !emailInput.trim()}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
                            disabled:cursor-not-allowed text-white text-sm font-semibold
-                           rounded-lg px-4 py-2.5 transition-colors whitespace-nowrap"
+                           rounded-lg px-4 py-2.5 transition-colors"
               >
-                {sendingInvite ? "Sending…" : "Send invite"}
+                {savingEmail ? "Saving…" : emailConfig ? "Update email" : "Save email address"}
               </button>
             </form>
 
-            {inviteError && (
-              <p className="text-sm text-red-400 bg-red-950 border border-red-800 rounded-lg px-4 py-2">
-                {inviteError}
-              </p>
-            )}
-
-            {lastInviteToken && (
-              <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 space-y-2">
-                <p className="text-xs text-gray-400 font-medium">Invite link (valid 7 days)</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs text-indigo-300 break-all font-mono">
-                    {typeof window !== "undefined"
-                      ? `${window.location.origin}/invite/accept?token=${lastInviteToken}`
-                      : `/invite/accept?token=${lastInviteToken}`}
-                  </code>
-                  <button
-                    onClick={() => {
-                      const url = `${window.location.origin}/invite/accept?token=${lastInviteToken}`;
-                      navigator.clipboard.writeText(url);
-                    }}
-                    className="shrink-0 text-xs text-gray-400 hover:text-white border border-gray-700
-                               hover:border-gray-500 rounded px-2 py-1 transition-colors"
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {invitations.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Pending invitations</p>
-                {invitations.map((inv) => (
-                  <div
-                    key={inv.id}
-                    className="flex items-center justify-between bg-gray-800 border border-gray-700
-                               rounded-lg px-4 py-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm text-white truncate">{inv.email}</p>
-                      <p className="text-xs text-gray-500">
-                        Expires {format(parseISO(inv.expires_at), "MMM d, yyyy")}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleRevoke(inv.id)}
-                      disabled={revokingId === inv.id}
-                      className="shrink-0 ml-4 text-xs text-red-400 hover:text-red-300
-                                 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {revokingId === inv.id ? "Revoking…" : "Revoke"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {invitations.length === 0 && (
-              <p className="text-xs text-gray-600">No pending invitations.</p>
-            )}
+            <p className="text-xs text-gray-600">
+              A confirmation link will be sent to the address. Alerts fire automatically
+              after each detection run once the address is verified.
+            </p>
           </section>
         )}
       </main>
