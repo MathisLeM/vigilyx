@@ -2,14 +2,15 @@ from collections import defaultdict
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.alert import AlertSeverity, DetectionMethod
 from app.models.tenant import Tenant
 from app.routers.auth import CurrentUser, assert_tenant_access, get_current_user
+from app.limiter import limiter
 from app.services.alert_service import (
     generate_combo_hint,
     get_alert_stats,
@@ -60,7 +61,7 @@ class DailyAlertGroup(BaseModel):
 
 
 class RunDetectionRequest(BaseModel):
-    detection_days: int = 7
+    detection_days: int = Field(default=7, ge=1, le=90)
     stripe_account_id: Optional[str] = None
 
 
@@ -195,7 +196,9 @@ def list_alerts(
 
 
 @router.post("/{tenant_id}/run-detection", response_model=RunDetectionResponse)
+@limiter.limit("5/minute")
 def trigger_detection(
+    request: Request,
     tenant_id: int,
     payload: RunDetectionRequest = RunDetectionRequest(),
     db: Session = Depends(get_db),

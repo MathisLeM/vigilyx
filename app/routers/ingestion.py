@@ -20,7 +20,7 @@ import logging
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -43,6 +43,7 @@ from app.services.ingestion.balance_ingester import (
     run_ingestion,
 )
 from app.services.ingestion.stripe_client import StripeAuthError, StripeClientError
+from app.limiter import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,9 @@ def _get_connection_or_404(conn_id: int, tenant_id: int, db: Session) -> StripeC
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/{tenant_id}/run", response_model=IngestionResponse)
+@limiter.limit("5/minute")
 def trigger_ingestion(
+    request: Request,
     tenant_id: int,
     connection_id: int = Query(..., description="ID of the StripeConnection to ingest from"),
     force_full: bool = Query(False, description="Ignore last-ingested timestamp and pull full lookback window"),
@@ -151,7 +154,7 @@ def trigger_ingestion(
         raise HTTPException(status_code=502, detail=f"Stripe API error: {exc}")
     except Exception as exc:
         logger.exception("Unexpected ingestion error for tenant %s: %s", tenant_id, exc)
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}")
+        raise HTTPException(status_code=500, detail="Ingestion failed. Please try again later.")
 
     return IngestionResponse(**result.to_dict())
 
@@ -261,8 +264,8 @@ def model_status(
         last_date = agg.last_date if agg else None
 
         # Check disk for model + metadata
-        has_model = model_exists(conn.stripe_account_id)
-        meta = read_model_meta(conn.stripe_account_id) if has_model else None
+        has_model = model_exists(tenant_id, conn.stripe_account_id)
+        meta = read_model_meta(tenant_id, conn.stripe_account_id) if has_model else None
         trained_at = None
         if meta and meta.get("trained_at"):
             try:
@@ -287,7 +290,9 @@ def model_status(
 
 
 @router.post("/{tenant_id}/train", response_model=TrainResult)
+@limiter.limit("3/minute")
 def trigger_training(
+    request: Request,
     tenant_id: int,
     connection_id: int = Query(..., description="ID of the StripeConnection to train a model for"),
     db: Session = Depends(get_db),
@@ -332,7 +337,7 @@ def trigger_training(
         logger.exception(
             "Training error for tenant=%s connection=%s: %s", tenant_id, conn.name, exc
         )
-        raise HTTPException(status_code=500, detail=f"Training failed: {exc}")
+        raise HTTPException(status_code=500, detail="Model training failed. Please try again later.")
 
     if meta is None:
         return TrainResult(

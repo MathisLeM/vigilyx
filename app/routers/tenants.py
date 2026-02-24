@@ -1,13 +1,22 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.tenant import Tenant
+from app.routers.auth import CurrentUser, get_current_user
 
 router = APIRouter()
+
+
+def _require_admin(current_user: CurrentUser) -> None:
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
 
 
 class TenantCreate(BaseModel):
@@ -26,12 +35,21 @@ class TenantOut(BaseModel):
 
 
 @router.get("/", response_model=list[TenantOut])
-def list_tenants(db: Session = Depends(get_db)):
+def list_tenants(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _require_admin(current_user)
     return db.query(Tenant).filter(Tenant.is_active == True).all()
 
 
 @router.post("/", response_model=TenantOut, status_code=201)
-def create_tenant(payload: TenantCreate, db: Session = Depends(get_db)):
+def create_tenant(
+    payload: TenantCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _require_admin(current_user)
     if db.query(Tenant).filter(Tenant.slug == payload.slug).first():
         raise HTTPException(status_code=400, detail="Slug already exists")
     tenant = Tenant(name=payload.name, slug=payload.slug)
@@ -42,7 +60,12 @@ def create_tenant(payload: TenantCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{tenant_id}", response_model=TenantOut)
-def get_tenant(tenant_id: int, db: Session = Depends(get_db)):
+def get_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _require_admin(current_user)
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
@@ -50,7 +73,12 @@ def get_tenant(tenant_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/{tenant_id}", status_code=204)
-def deactivate_tenant(tenant_id: int, db: Session = Depends(get_db)):
+def deactivate_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _require_admin(current_user)
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")

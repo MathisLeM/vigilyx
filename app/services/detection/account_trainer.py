@@ -18,6 +18,7 @@ Feature vector (order must match isolation_forest.py and train_base_model.py):
 import json
 import logging
 import os
+import re
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -46,20 +47,32 @@ MODEL_FEATURE_NAMES = [
 ]
 
 
-def _model_path(stripe_account_id: str) -> str:
-    return os.path.join(MODEL_DIR, f"account_{stripe_account_id}.pkl")
+_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
 
 
-def _meta_path(stripe_account_id: str) -> str:
-    return os.path.join(MODEL_DIR, f"account_{stripe_account_id}_meta.json")
+def _safe_account_key(tenant_id: int, stripe_account_id: str) -> str:
+    """Return a filesystem-safe key. Raises ValueError on invalid IDs."""
+    if not _SAFE_ID_RE.match(stripe_account_id):
+        raise ValueError(f"Invalid stripe_account_id: {stripe_account_id!r}")
+    return f"{tenant_id}_{stripe_account_id}"
 
 
-def model_exists(stripe_account_id: str) -> bool:
-    return os.path.exists(_model_path(stripe_account_id))
+def _model_path(tenant_id: int, stripe_account_id: str) -> str:
+    key = _safe_account_key(tenant_id, stripe_account_id)
+    return os.path.join(MODEL_DIR, f"account_{key}.pkl")
 
 
-def read_model_meta(stripe_account_id: str) -> Optional[dict]:
-    path = _meta_path(stripe_account_id)
+def _meta_path(tenant_id: int, stripe_account_id: str) -> str:
+    key = _safe_account_key(tenant_id, stripe_account_id)
+    return os.path.join(MODEL_DIR, f"account_{key}_meta.json")
+
+
+def model_exists(tenant_id: int, stripe_account_id: str) -> bool:
+    return os.path.exists(_model_path(tenant_id, stripe_account_id))
+
+
+def read_model_meta(tenant_id: int, stripe_account_id: str) -> Optional[dict]:
+    path = _meta_path(tenant_id, stripe_account_id)
     if not os.path.exists(path):
         return None
     try:
@@ -180,7 +193,7 @@ def train_account_model(
     clf.fit(X)
 
     os.makedirs(MODEL_DIR, exist_ok=True)
-    mp = _model_path(stripe_account_id)
+    mp = _model_path(tenant_id, stripe_account_id)
     joblib.dump(clf, mp)
 
     trained_at = datetime.now(timezone.utc)
@@ -197,7 +210,7 @@ def train_account_model(
         "n_estimators":      N_ESTIMATORS,
         "feature_names":     MODEL_FEATURE_NAMES,
     }
-    with open(_meta_path(stripe_account_id), "w") as f:
+    with open(_meta_path(tenant_id, stripe_account_id), "w") as f:
         json.dump(meta, f, indent=2)
 
     # Bust in-process model cache so the new model is picked up immediately

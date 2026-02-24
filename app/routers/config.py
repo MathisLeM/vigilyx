@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ from app.routers.auth import CurrentUser, assert_tenant_access, get_current_user
 from app.services.crypto import decrypt_key, encrypt_key
 from app.services.email_service import send_verification_email
 from app.services.slack_notifier import VALID_LEVELS, send_test_message
+from app.limiter import limiter
 
 router = APIRouter()
 
@@ -294,7 +295,9 @@ def delete_stripe_connection(
 
 
 @router.post("/{tenant_id}/stripe-connections/{conn_id}/test", response_model=TestResult)
+@limiter.limit("10/minute")
 def test_stripe_connection(
+    request: Request,
     tenant_id: int,
     conn_id: int,
     db: Session = Depends(get_db),
@@ -311,7 +314,7 @@ def test_stripe_connection(
     if not plain:
         raise HTTPException(
             status_code=500,
-            detail="Failed to decrypt API key — check FERNET_KEY in .env",
+            detail="Failed to decrypt API key. Please contact support.",
         )
 
     try:
@@ -429,7 +432,9 @@ def delete_slack_config(
 
 
 @router.post("/{tenant_id}/test-slack", response_model=TestResult)
+@limiter.limit("5/minute")
 def test_slack_webhook(
+    request: Request,
     tenant_id: int,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
@@ -445,7 +450,7 @@ def test_slack_webhook(
     if not plain:
         raise HTTPException(
             status_code=500,
-            detail="Failed to decrypt Slack webhook URL — check FERNET_KEY in .env",
+            detail="Failed to decrypt Slack webhook URL. Please contact support.",
         )
 
     try:
@@ -525,10 +530,10 @@ def save_email_config(
     assert_tenant_access(current_user, tenant_id)
     tenant = _get_tenant_or_404(tenant_id, db)
 
-    if payload.alert_level not in EMAIL_VALID_LEVELS:
+    if payload.alert_level not in VALID_LEVELS:
         raise HTTPException(
             status_code=422,
-            detail=f"alert_level must be one of: {', '.join(sorted(EMAIL_VALID_LEVELS))}",
+            detail=f"alert_level must be one of: {', '.join(sorted(VALID_LEVELS))}",
         )
 
     now = datetime.now(timezone.utc)
