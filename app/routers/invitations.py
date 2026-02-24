@@ -21,7 +21,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,7 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.routers.auth import (
     CurrentUser,
+    _set_auth_cookie,
     assert_tenant_access,
     create_access_token,
     get_current_user,
@@ -52,11 +53,25 @@ class InviteRequest(BaseModel):
 
 
 class InvitationOut(BaseModel):
+    """Returned only at creation time — includes the token so the inviter can share the link."""
     id: int
     tenant_id: int
     email: str
     role: str
     token: str
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class InvitationListOut(BaseModel):
+    """Returned by the list endpoint — token is intentionally omitted."""
+    id: int
+    tenant_id: int
+    email: str
+    role: str
     created_at: datetime
     expires_at: datetime
     accepted_at: Optional[datetime]
@@ -78,8 +93,6 @@ class AcceptRequest(BaseModel):
 
 
 class AcceptOut(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
     tenant_id: int
     email: str
     is_admin: bool
@@ -126,7 +139,7 @@ def validate_token(token: str, db: Session = Depends(get_db)):
 
 
 @router.post("/accept", response_model=AcceptOut, status_code=201)
-def accept_invitation(payload: AcceptRequest, db: Session = Depends(get_db)):
+def accept_invitation(payload: AcceptRequest, response: Response, db: Session = Depends(get_db)):
     """Complete registration from an invitation token. No authentication required."""
     inv = db.query(Invitation).filter(Invitation.token == payload.token).first()
     if not inv:
@@ -160,12 +173,8 @@ def accept_invitation(payload: AcceptRequest, db: Session = Depends(get_db)):
         "email": user.email,
         "is_admin": user.is_admin,
     })
-    return AcceptOut(
-        access_token=token,
-        tenant_id=user.tenant_id,
-        email=user.email,
-        is_admin=user.is_admin,
-    )
+    _set_auth_cookie(response, token)
+    return AcceptOut(tenant_id=user.tenant_id, email=user.email, is_admin=user.is_admin)
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +234,7 @@ def create_invitation(
     return inv
 
 
-@router.get("/{tenant_id}", response_model=list[InvitationOut])
+@router.get("/{tenant_id}", response_model=list[InvitationListOut])
 def list_invitations(
     tenant_id: int,
     db: Session = Depends(get_db),

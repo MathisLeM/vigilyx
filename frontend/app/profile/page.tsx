@@ -373,10 +373,7 @@ export default function ProfilePage() {
     try {
       await revokeInvitation(tenantId, invitationId);
       setInvitations((prev) => prev.filter((i) => i.id !== invitationId));
-      if (lastInviteToken) {
-        const revokedInv = invitations.find((i) => i.id === invitationId);
-        if (revokedInv?.token === lastInviteToken) setLastInviteToken(null);
-      }
+      setLastInviteToken(null);
     } catch (e) { console.error(e); }
     finally { setRevokingId(null); }
   }

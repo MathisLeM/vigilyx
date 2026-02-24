@@ -1,22 +1,19 @@
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("token");
-}
-
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API}${path}`, { ...options, headers });
+  const res = await fetch(`${API}${path}`, {
+    ...options,
+    headers,
+    credentials: "include",  // send httpOnly auth cookie on every request
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "API error");
@@ -28,19 +25,21 @@ async function request<T>(
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 
-export interface LoginResponse {
-  access_token: string;
-  token_type: string;
+export interface UserInfo {
   tenant_id: number | null;
   email: string;
   is_admin: boolean;
 }
 
-export async function login(email: string, password: string): Promise<LoginResponse> {
+// Keep LoginResponse as an alias so existing imports don't break
+export type LoginResponse = UserInfo;
+
+export async function login(email: string, password: string): Promise<UserInfo> {
   const body = new URLSearchParams({ username: email, password });
   const res = await fetch(`${API}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    credentials: "include",
     body: body.toString(),
   });
   if (!res.ok) {
@@ -50,10 +49,11 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return res.json();
 }
 
-export async function signup(email: string, password: string): Promise<LoginResponse> {
+export async function signup(email: string, password: string): Promise<UserInfo> {
   const res = await fetch(`${API}/auth/signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {
@@ -61,6 +61,14 @@ export async function signup(email: string, password: string): Promise<LoginResp
     throw new Error(err.detail ?? "Signup failed");
   }
   return res.json();
+}
+
+export function fetchMe(): Promise<UserInfo> {
+  return request<UserInfo>("/auth/me");
+}
+
+export function apiLogout(): Promise<void> {
+  return request<void>("/auth/logout", { method: "POST" });
 }
 
 // ── Tenants ───────────────────────────────────────────────────────────────
@@ -389,7 +397,9 @@ export function resendEmailVerification(tenantId: number): Promise<VerifyEmailRe
 
 export function verifyEmailToken(token: string): Promise<VerifyEmailResponse> {
   const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  return fetch(`${BASE}/config/email/verify?token=${encodeURIComponent(token)}`)
+  return fetch(`${BASE}/config/email/verify?token=${encodeURIComponent(token)}`, {
+    credentials: "include",
+  })
     .then(async (r) => {
       const data = await r.json();
       return data as VerifyEmailResponse;
@@ -438,7 +448,6 @@ export interface Invitation {
   tenant_id: number;
   email: string;
   role: string;
-  token: string;
   created_at: string;
   expires_at: string;
   accepted_at: string | null;
@@ -453,8 +462,6 @@ export interface AcceptTokenInfo {
 }
 
 export interface AcceptOut {
-  access_token: string;
-  token_type: string;
   tenant_id: number;
   email: string;
   is_admin: boolean;
@@ -477,7 +484,9 @@ export function revokeInvitation(tenantId: number, invitationId: number): Promis
 
 export function validateInviteToken(token: string): Promise<AcceptTokenInfo> {
   const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  return fetch(`${BASE}/invitations/accept?token=${encodeURIComponent(token)}`)
+  return fetch(`${BASE}/invitations/accept?token=${encodeURIComponent(token)}`, {
+    credentials: "include",
+  })
     .then((r) => {
       if (!r.ok) throw new Error("Invalid invitation");
       return r.json();
@@ -489,6 +498,7 @@ export function acceptInvitation(token: string, password: string): Promise<Accep
   return fetch(`${BASE}/invitations/accept`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ token, password }),
   }).then(async (r) => {
     if (!r.ok) {

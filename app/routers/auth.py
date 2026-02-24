@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordRequestForm
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -22,8 +22,6 @@ router = APIRouter()
 # Auth dependency — reused by all protected routers
 # ---------------------------------------------------------------------------
 
-_bearer = HTTPBearer()
-
 
 class CurrentUser(BaseModel):
     user_id: int
@@ -32,14 +30,18 @@ class CurrentUser(BaseModel):
     is_admin: bool
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
-) -> CurrentUser:
+def get_current_user(request: Request) -> CurrentUser:
     """
-    Decode and validate the Bearer JWT from the Authorization header.
-    Raises HTTP 401 if the token is missing, expired, or invalid.
+    Decode and validate the JWT from the httpOnly access_token cookie.
+    Raises HTTP 401 if the cookie is missing, expired, or invalid.
     """
-    token = credentials.credentials
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     except JWTError:
@@ -92,22 +94,26 @@ def create_access_token(data: dict) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=settings.is_production,   # HTTPS-only in prod, HTTP allowed in dev
+        samesite="lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
 
 
-class TokenOut(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    tenant_id: Optional[int]  # null for admin
+class UserOut(BaseModel):
+    tenant_id: Optional[int]
     email: str
     is_admin: bool
-
-
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
 
 
 class SignupRequest(BaseModel):
@@ -120,10 +126,11 @@ class SignupRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/signup", response_model=TokenOut)
+@router.post("/signup", response_model=UserOut)
 @limiter.limit("5/minute")
 def signup(
     request: Request,
+    response: Response,
     body: SignupRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -162,13 +169,15 @@ def signup(
         "email": user.email,
         "is_admin": False,
     })
-    return TokenOut(access_token=token, tenant_id=tenant.id, email=user.email, is_admin=False)
+    _set_auth_cookie(response, token)
+    return UserOut(tenant_id=tenant.id, email=user.email, is_admin=False)
 
 
-@router.post("/login", response_model=TokenOut)
+@router.post("/login", response_model=UserOut)
 @limiter.limit("10/minute")
 def login(
-    request: Request,  # required by slowapi
+    request: Request,
+    response: Response,
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
@@ -188,9 +197,19 @@ def login(
         "email": user.email,
         "is_admin": user.is_admin,
     })
-    return TokenOut(
-        access_token=token,
-        tenant_id=user.tenant_id,
-        email=user.email,
-        is_admin=user.is_admin,
+    _set_auth_cookie(response, token)
+    return UserOut(tenant_id=user.tenant_id, email=user.email, is_admin=user.is_admin)
+
+
+@router.post("/logout", status_code=204)
+def logout(response: Response):
+    response.delete_cookie("access_token", samesite="lax")
+
+
+@router.get("/me", response_model=UserOut)
+def me(current_user: CurrentUser = Depends(get_current_user)):
+    return UserOut(
+        tenant_id=current_user.tenant_id,
+        email=current_user.email,
+        is_admin=current_user.is_admin,
     )

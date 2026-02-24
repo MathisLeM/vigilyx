@@ -3,10 +3,12 @@
 import { useEffect, useState, FormEvent, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { validateInviteToken, acceptInvitation, AcceptTokenInfo } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 function AcceptForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { refetchUser } = useAuth();
   const token = searchParams.get("token") ?? "";
 
   const [tokenInfo, setTokenInfo] = useState<AcceptTokenInfo | null>(null);
@@ -50,12 +52,8 @@ function AcceptForm() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const result = await acceptInvitation(token, password);
-      // Write the same localStorage keys as useAuth
-      localStorage.setItem("token", result.access_token);
-      localStorage.setItem("tenantId", String(result.tenant_id));
-      localStorage.setItem("email", result.email);
-      localStorage.setItem("isAdmin", String(result.is_admin));
+      await acceptInvitation(token, password);
+      await refetchUser();
       router.replace("/dashboard");
     } catch (err: unknown) {
       setSubmitError(err instanceof Error ? err.message : "Registration failed");

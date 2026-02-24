@@ -7,19 +7,20 @@ import {
   useEffect,
   useState,
 } from "react";
-import { login as apiLogin, signup as apiSignup, LoginResponse } from "./api";
+import { login as apiLogin, signup as apiSignup, fetchMe, apiLogout, UserInfo } from "./api";
 
 interface AuthState {
-  token: string | null;
   tenantId: number | null;
   email: string | null;
   isAdmin: boolean;
+  loaded: boolean; // true once the initial /auth/me check has completed
 }
 
 interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  refetchUser: () => Promise<void>;
   isAuthenticated: boolean;
 }
 
@@ -27,62 +28,64 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [auth, setAuth] = useState<AuthState>({
-    token: null,
     tenantId: null,
     email: null,
     isAdmin: false,
+    loaded: false,
   });
 
-  // Rehydrate from localStorage on mount
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    const tenantId = localStorage.getItem("tenantId");
-    const email = localStorage.getItem("email");
-    const isAdmin = localStorage.getItem("isAdmin") === "true";
-    if (token) {
-      setAuth({
-        token,
-        tenantId: tenantId ? Number(tenantId) : null,
-        email,
-        isAdmin,
-      });
-    }
-  }, []);
-
-  function storeAuth(data: LoginResponse) {
-    localStorage.setItem("token", data.access_token);
-    localStorage.setItem("tenantId", data.tenant_id != null ? String(data.tenant_id) : "");
-    localStorage.setItem("email", data.email);
-    localStorage.setItem("isAdmin", String(data.is_admin));
+  function applyUser(data: UserInfo) {
     setAuth({
-      token: data.access_token,
       tenantId: data.tenant_id,
       email: data.email,
       isAdmin: data.is_admin,
+      loaded: true,
     });
   }
 
+  // On mount: check the httpOnly cookie via /auth/me
+  useEffect(() => {
+    fetchMe()
+      .then(applyUser)
+      .catch(() => setAuth({ tenantId: null, email: null, isAdmin: false, loaded: true }));
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
-    const data: LoginResponse = await apiLogin(email, password);
-    storeAuth(data);
+    const data = await apiLogin(email, password);
+    applyUser(data);
   }, []);
 
   const signup = useCallback(async (email: string, password: string) => {
-    const data: LoginResponse = await apiSignup(email, password);
-    storeAuth(data);
+    const data = await apiSignup(email, password);
+    applyUser(data);
   }, []);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("tenantId");
-    localStorage.removeItem("email");
-    localStorage.removeItem("isAdmin");
-    setAuth({ token: null, tenantId: null, email: null, isAdmin: false });
+  const logout = useCallback(async () => {
+    await apiLogout();
+    setAuth({ tenantId: null, email: null, isAdmin: false, loaded: true });
+  }, []);
+
+  // Call this after any flow that sets the cookie outside the normal login/signup
+  // (e.g. invitation accept), then redirect.
+  const refetchUser = useCallback(async () => {
+    try {
+      const data = await fetchMe();
+      applyUser(data);
+    } catch {
+      setAuth({ tenantId: null, email: null, isAdmin: false, loaded: true });
+    }
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ ...auth, login, signup, logout, isAuthenticated: !!auth.token }}
+      value={{
+        ...auth,
+        login,
+        signup,
+        logout,
+        refetchUser,
+        isAuthenticated: auth.loaded && !!auth.email,
+      }}
     >
       {children}
     </AuthContext.Provider>

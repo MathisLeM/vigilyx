@@ -62,7 +62,7 @@ export default function NavSidebar({ children }: Props) {
 
       {/* Disconnect */}
       <button
-        onClick={() => { logout(); router.push("/login"); }}
+        onClick={async () => { await logout(); router.push("/login"); }}
         className="w-full mt-4 rounded-lg border border-red-800 bg-transparent hover:bg-red-950
                    text-red-400 hover:text-red-300 text-sm font-medium px-4 py-2.5
                    transition-colors"
