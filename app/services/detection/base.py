@@ -1,6 +1,6 @@
 """
-BASE DETECTOR — Phase 3
-=========================
+BASE DETECTOR
+=============
 Abstract base class for anomaly detectors.
 
 Implementing this interface makes the detection layer ML-ready:

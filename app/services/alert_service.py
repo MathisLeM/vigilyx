@@ -1,10 +1,9 @@
 """
-ALERT SERVICE — Phase 3
-=========================
+ALERT SERVICE
+=============
 Orchestrates the full anomaly detection pipeline:
 
-  1. Load DailyRevenueMetrics from the FEATURE layer as a DataFrame
-     (replaces the Phase 1 kpi_service stub).
+  1. Load DailyRevenueMetrics from the FEATURE layer as a DataFrame.
   2. Run MADDetector + ZScoreDetector on each of the 9 Stripe-aligned metrics.
   3. Flag dual-confirmed alerts (both methods agree = higher confidence).
   4. Compute severity from % deviation off the rolling median baseline.

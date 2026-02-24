@@ -1,6 +1,6 @@
 """
-Z-SCORE DETECTOR — Phase 3
-============================
+Z-SCORE DETECTOR
+================
 Rolling Z-score anomaly detector.
 
 Role in the dual-detection system:

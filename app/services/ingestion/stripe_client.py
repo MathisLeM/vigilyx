@@ -1,5 +1,5 @@
 """
-STRIPE CLIENT — Phase 2 ingestion
+STRIPE CLIENT
 ===================================
 Thin wrapper around the Stripe balance_transactions list API.
 

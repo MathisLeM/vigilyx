@@ -1,6 +1,6 @@
 """
-MAD DETECTOR — Phase 3
-========================
+MAD DETECTOR
+============
 Median Absolute Deviation anomaly detector.
 
 Why MAD over Z-score as the primary detector:

@@ -1,5 +1,5 @@
 """
-BALANCE INGESTER — Phase 2/3 ingestion
+BALANCE INGESTER
 =========================================
 Orchestrates a full ingestion run for one tenant / one Stripe connection:
 
@@ -117,7 +117,7 @@ def _insert_raw(
     Insert one validated StripeBalanceTransaction into raw_balance_transactions.
     Returns True if inserted, False if skipped (duplicate or non-base-currency).
     """
-    # Phase 2: only handle base-currency rows; skip multi-currency (Phase 3+)
+    # Only handle base-currency rows; skip multi-currency transactions
     if txn.currency != base_currency:
         return False
 

@@ -1,11 +1,9 @@
 """
-FEATURE BUILDER — Phase 2 ingestion
-======================================
+FEATURE BUILDER
+===============
 Aggregates raw_balance_transactions into daily_revenue_metrics.
 
 This is the canonical implementation of the RAW -> FEATURE aggregation.
-It replaces the identical function in simulation/seed_demo.py (which was
-a Phase 1 bootstrap; seed_demo.py will call this module in Phase 2+).
 
 Design:
 - Idempotent upsert: safe to re-run for any date range.
@@ -148,7 +146,7 @@ def _aggregate_one_day(
         )
         db.add(obj)
 
-    # Original currency columns (same as USD in Phase 2 for USD accounts)
+    # Original currency columns (same as USD for USD-native accounts)
     obj.gross_revenue    = gross_revenue
     obj.total_fees       = total_fees
     obj.net_revenue      = net_revenue

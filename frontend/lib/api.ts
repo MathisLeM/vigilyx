@@ -83,7 +83,7 @@ export function fetchTenants(): Promise<Tenant[]> {
   return request<Tenant[]>("/tenants/");
 }
 
-// ── Daily Metric Snapshots (Phase 1+) ─────────────────────────────────────
+// ── Daily Metric Snapshots ────────────────────────────────────────────────
 // Served from /metrics/ — reads from daily_revenue_metrics (Stripe-aligned).
 // All monetary values are in DOLLARS (float).
 
@@ -272,7 +272,7 @@ export function testStripeConnection(
   );
 }
 
-// ── Ingestion (Phase 2/3) ──────────────────────────────────────────────────
+// ── Ingestion ─────────────────────────────────────────────────────────────
 
 export interface IngestionResult {
   tenant_id: number;

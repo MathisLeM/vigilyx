@@ -1,1 +1,1 @@
-# Detection service package — Phase 3
+# Detection service package

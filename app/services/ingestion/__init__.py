@@ -1,1 +1,1 @@
-# Ingestion service package — Phase 2
+# Ingestion service package

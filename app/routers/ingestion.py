@@ -1,6 +1,6 @@
 """
-INGESTION ROUTER — Phase 3
-==============================
+INGESTION ROUTER
+================
 Exposes endpoints to trigger and inspect Stripe data ingestion.
 
 Endpoints:
@@ -12,8 +12,8 @@ Endpoints:
       Returns ingestion status for each Stripe connection the tenant has:
       last ingested timestamp, total raw row count, and whether a key is set.
 
-The ingestion runs synchronously in the request handler for now.
-Phase 3+ can move long-running ingestions to a background task.
+Ingestion runs synchronously in the request handler. Long-running ingestions
+could be moved to a background task queue if needed.
 """
 
 import logging
