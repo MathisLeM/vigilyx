@@ -255,7 +255,7 @@ export default function DashboardPage() {
         {!isAdmin && selectedConnId !== null && (
           <div className="flex items-center gap-2">
             <p className="text-gray-400 text-sm">Stripe account:</p>
-            <p className="text-white font-semibold">
+            <p className="text-indigo-400 font-semibold">
               {connections.find((c) => c.id === selectedConnId)?.name}
             </p>
             <button
