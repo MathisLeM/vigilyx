@@ -52,10 +52,12 @@ function AlertRow({
   tenantId,
   alert,
   onRefresh,
+  onAlertClick,
 }: {
   tenantId: number;
   alert: Alert;
   onRefresh: () => void;
+  onAlertClick: (metricName: string) => void;
 }) {
   const [resolving, setResolving] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -79,7 +81,7 @@ function AlertRow({
         className="grid grid-cols-[1fr_80px_100px_120px_80px_100px] gap-3 px-6 py-2.5
                    hover:bg-gray-800/40 transition-colors items-center cursor-pointer
                    border-b border-gray-800/40 last:border-0"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => { setExpanded((v) => !v); onAlertClick(alert.metric_name); }}
       >
         {/* Metric */}
         <span className="text-sm text-white">
@@ -251,6 +253,7 @@ function DayGroupRow({
                 tenantId={tenantId}
                 alert={a}
                 onRefresh={onRefresh}
+                onAlertClick={onAlertClick}
               />
             ))}
           </div>

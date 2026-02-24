@@ -142,20 +142,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {tab === "login" && (
-          <div className="mt-6 space-y-1.5 text-center text-xs text-gray-500">
-            <p>
-              <span className="text-gray-400">acme@demo.com</span> or{" "}
-              <span className="text-gray-400">globex@demo.com</span> — password:{" "}
-              <span className="text-gray-400">demo1234</span>
-            </p>
-            <p>
-              <span className="text-indigo-400 font-medium">admin@demo.com</span> — password:{" "}
-              <span className="text-gray-400">admin1234</span>{" "}
-              <span className="text-indigo-500">(all companies)</span>
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

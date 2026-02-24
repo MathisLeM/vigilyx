@@ -94,6 +94,7 @@ export default function ProfilePage() {
   const [addSaving, setAddSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [showAlphaModal, setShowAlphaModal] = useState(false);
+  const [alphaCopied, setAlphaCopied] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [testResults, setTestResults] = useState<Record<number, TestResult>>({});
@@ -1224,19 +1225,24 @@ export default function ProfilePage() {
               <h2 className="text-lg font-bold text-white">Closed alpha</h2>
               <p className="text-sm text-gray-400 leading-relaxed">
                 Real Stripe connections are invite-only during the alpha.
-                Send us an email and we&apos;ll unlock your account within 24h.
+                Request an access by mail.
               </p>
             </div>
 
-            <a
-              href={`mailto:mathis@vigilyx.io?subject=Stripe access request&body=Hi, I'd like to connect my real Stripe account to Vigilyx. My account email is: ${email}`}
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText("mathis.le-mouel@orange.fr");
+                setAlphaCopied(true);
+                setTimeout(() => setAlphaCopied(false), 2000);
+              }}
               className="flex items-center justify-center gap-2 w-full bg-indigo-600
                          hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl
                          px-4 py-3 transition-colors"
             >
-              <span>✉️</span>
-              <span>Request access — mathis@vigilyx.io</span>
-            </a>
+              <span>{alphaCopied ? "✓" : "✉️"}</span>
+              <span>{alphaCopied ? "Copied!" : "Copy email — mathis.le-mouel@orange.fr"}</span>
+            </button>
 
             <button
               type="button"
