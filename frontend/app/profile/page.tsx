@@ -132,6 +132,7 @@ export default function ProfilePage() {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [lastInviteToken, setLastInviteToken] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) { router.replace("/login"); return; }
@@ -399,7 +400,7 @@ export default function ProfilePage() {
           <section className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-5">
             <h2 className="text-base font-semibold text-gray-200">Team</h2>
             <p className="text-sm text-gray-500">
-              Invite coworkers to join your company account. They will receive a one-time link to set a password.
+              Invite coworkers to join your company account. Copy and share the generated link to give them access.
             </p>
 
             <form onSubmit={handleSendInvite} className="flex gap-3">
@@ -420,7 +421,7 @@ export default function ProfilePage() {
                            disabled:cursor-not-allowed text-white text-sm font-semibold
                            rounded-lg px-4 py-2.5 transition-colors whitespace-nowrap"
               >
-                {sendingInvite ? "Sending…" : "Send invite"}
+                {sendingInvite ? "Creating…" : "Create invite link"}
               </button>
             </form>
 
@@ -443,11 +444,14 @@ export default function ProfilePage() {
                     onClick={() => {
                       const url = `${window.location.origin}/invite/accept?token=${lastInviteToken}`;
                       navigator.clipboard.writeText(url);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
                     }}
-                    className="shrink-0 text-xs text-gray-400 hover:text-white border border-gray-700
-                               hover:border-gray-500 rounded px-2 py-1 transition-colors"
+                    className="shrink-0 text-xs border rounded px-2 py-1 transition-colors
+                               border-gray-700 hover:border-gray-500
+                               text-gray-400 hover:text-white"
                   >
-                    Copy
+                    {copied ? "Copied!" : "Copy"}
                   </button>
                 </div>
               </div>

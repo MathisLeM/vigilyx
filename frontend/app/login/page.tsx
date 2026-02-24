@@ -81,7 +81,7 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder={tab === "login" ? "acme@demo.com" : "you@company.com"}
+              placeholder="you@company.com"
               className="w-full rounded-lg bg-gray-800 border border-gray-700 px-4 py-2.5
                          text-white placeholder-gray-500 focus:outline-none focus:ring-2
                          focus:ring-indigo-500 focus:border-transparent transition"

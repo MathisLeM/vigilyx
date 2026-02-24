@@ -157,6 +157,38 @@ The scheduler runs ingestion and detection automatically every hour, and retrain
 - [ ] Tenant self-registration flow (no manual DB seeding)
 - [ ] Admin dashboard: cross-tenant anomaly overview
 
+## Production Deployment Checklist
+
+Before going live, set the following environment variables on your server (Railway, Fly.io, etc.):
+
+```bash
+# Required — startup will fail if missing or still set to placeholders
+ENVIRONMENT=production
+DATABASE_URL=postgresql://user:password@host:5432/vigilyx
+SECRET_KEY=<python -c "import secrets; print(secrets.token_hex(32))">
+FERNET_KEY=<python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())">
+ALLOWED_ORIGINS=https://app.yourdomain.com
+
+# Required for frontend (set at build time in Vercel / next build)
+NEXT_PUBLIC_API_URL=https://api.yourdomain.com
+
+# Strongly recommended — needed for email verification links
+APP_URL=https://app.yourdomain.com
+
+# Optional — leave empty to disable email alerting
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=alerts@yourdomain.com
+SMTP_PASS=<app-password>
+FROM_EMAIL=Vigilyx <alerts@yourdomain.com>
+```
+
+**Verification steps after deploy:**
+1. `GET /health` → should return `{"status": "ok"}`
+2. Login with a demo account → confirm CORS is not blocked
+3. Create an invitation → copy the link and open it in a private window
+4. Check Railway logs for scheduler startup: `Scheduler started — ingestion every 1h`
+
 ## Infrastructure (production)
 
 | Component | Recommended service | Notes |

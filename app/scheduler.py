@@ -9,6 +9,10 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 _scheduler = BackgroundScheduler()
 
+# Consecutive ingestion failure counters per connection (in-memory, resets on success or restart)
+_ingestion_failures: dict[int, int] = {}
+_FAILURE_ALERT_THRESHOLD = 3
+
 
 # ── Detection job ─────────────────────────────────────────────────────────────
 
@@ -126,21 +130,41 @@ def _ingestion_job():
                         result.raw_skipped,
                         result.features_written,
                     )
+                    _ingestion_failures.pop(conn.id, None)  # reset on success
                 except StripeAuthError as exc:
+                    _ingestion_failures[conn.id] = _ingestion_failures.get(conn.id, 0) + 1
                     logger.error(
                         "Scheduler ingestion — tenant %s conn '%s': auth error: %s",
                         tenant.id, conn.name, exc,
                     )
+                    if _ingestion_failures[conn.id] >= _FAILURE_ALERT_THRESHOLD:
+                        logger.error(
+                            "PERSISTENT AUTH FAILURE — tenant %s conn '%s' has failed %d times in a row; "
+                            "check that the Stripe API key is still valid",
+                            tenant.id, conn.name, _ingestion_failures[conn.id],
+                        )
                 except StripeClientError as exc:
+                    _ingestion_failures[conn.id] = _ingestion_failures.get(conn.id, 0) + 1
                     logger.warning(
                         "Scheduler ingestion — tenant %s conn '%s': Stripe error: %s",
                         tenant.id, conn.name, exc,
                     )
+                    if _ingestion_failures[conn.id] >= _FAILURE_ALERT_THRESHOLD:
+                        logger.warning(
+                            "PERSISTENT STRIPE ERROR — tenant %s conn '%s' has failed %d times in a row",
+                            tenant.id, conn.name, _ingestion_failures[conn.id],
+                        )
                 except Exception as exc:
+                    _ingestion_failures[conn.id] = _ingestion_failures.get(conn.id, 0) + 1
                     logger.exception(
                         "Scheduler ingestion — tenant %s conn '%s': unexpected error: %s",
                         tenant.id, conn.name, exc,
                     )
+                    if _ingestion_failures[conn.id] >= _FAILURE_ALERT_THRESHOLD:
+                        logger.error(
+                            "PERSISTENT FAILURE — tenant %s conn '%s' has failed %d times in a row",
+                            tenant.id, conn.name, _ingestion_failures[conn.id],
+                        )
     finally:
         db.close()
 
