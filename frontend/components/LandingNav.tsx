@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useAuth } from "@/lib/auth";
 
 export default function LandingNav() {
@@ -18,7 +19,7 @@ export default function LandingNav() {
 
         {/* Logo — centered, cropped 15% top+bottom (overflow-hidden on wrapper) */}
         <Link href="/" className="overflow-hidden h-32 flex items-center justify-center">
-          <img src="/vigilyx_logo.png" alt="Vigilyx" className="h-80 w-auto block shrink-0" />
+          <Image src="/vigilyx_logo.png" alt="Vigilyx" width={320} height={320} className="h-80 w-auto block shrink-0" />
         </Link>
 
         {/* CTA — absolute right */}

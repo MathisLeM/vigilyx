@@ -43,7 +43,7 @@ Anomaly detection runs on the *_usd columns so metrics are
 comparable across currencies within a tenant.
 """
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from sqlalchemy import (
     BigInteger, Column, Date, DateTime, Float,
     Index, Integer, String, UniqueConstraint,

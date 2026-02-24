@@ -9,7 +9,6 @@ import { format, parseISO } from "date-fns";
 import { useAuth } from "@/lib/auth";
 import {
   listStripeConnections,
-  addStripeConnection,
   deleteStripeConnection,
   testStripeConnection,
   fetchIngestionStatus,
@@ -88,11 +87,6 @@ export default function ProfilePage() {
 
   // ── Stripe connections ─────────────────────────────────────────────────────
   const [connections, setConnections] = useState<StripeConnection[]>([]);
-  const [addName, setAddName] = useState("");
-  const [addKey, setAddKey] = useState("");
-  const [showAddKey, setShowAddKey] = useState(false);
-  const [addSaving, setAddSaving] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
   const [showAlphaModal, setShowAlphaModal] = useState(false);
   const [alphaCopied, setAlphaCopied] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -161,23 +155,6 @@ export default function ProfilePage() {
 
 
   // ── Stripe connection handlers ─────────────────────────────────────────────
-
-  async function handleAddConnection(e: FormEvent) {
-    e.preventDefault();
-    if (!tenantId || !addName.trim() || !addKey.trim()) return;
-    setAddSaving(true);
-    setAddError(null);
-    try {
-      const conn = await addStripeConnection(tenantId, addName.trim(), addKey.trim());
-      setConnections((prev) => [...prev, conn]);
-      setAddName("");
-      setAddKey("");
-    } catch (err: unknown) {
-      setAddError(err instanceof Error ? err.message : "Failed to add connection");
-    } finally {
-      setAddSaving(false);
-    }
-  }
 
   async function handleDelete(connId: number) {
     if (!tenantId) return;
@@ -890,7 +867,7 @@ export default function ProfilePage() {
             })}
 
             <p className="text-xs text-gray-600">
-              The custom model learns your account's specific patterns (seasonality, volume, fee profile)
+              The custom model learns your account&apos;s specific patterns (seasonality, volume, fee profile)
               and replaces the generic base model for anomaly detection on this account.
             </p>
           </section>

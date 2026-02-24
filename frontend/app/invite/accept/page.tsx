@@ -12,8 +12,10 @@ function AcceptForm() {
   const token = searchParams.get("token") ?? "";
 
   const [tokenInfo, setTokenInfo] = useState<AcceptTokenInfo | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(!!token);
+  const [tokenError, setTokenError] = useState<string | null>(
+    !token ? "No invitation token found in this link." : null
+  );
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -21,11 +23,7 @@ function AcceptForm() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) {
-      setTokenError("No invitation token found in this link.");
-      setLoading(false);
-      return;
-    }
+    if (!token) return;
     validateInviteToken(token)
       .then((info) => {
         setTokenInfo(info);

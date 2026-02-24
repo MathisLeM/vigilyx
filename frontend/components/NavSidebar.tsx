@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 
@@ -23,7 +24,7 @@ export default function NavSidebar({ children }: Props) {
       {/* Logo + user */}
       <div className="mb-6">
         <Link href="/" className="flex items-center justify-center">
-          <img src="/vigilyx_logo.png" alt="Vigilyx" className="w-full h-auto" />
+          <Image src="/vigilyx_logo.png" alt="Vigilyx" width={200} height={60} className="w-full h-auto" />
         </Link>
         <p className="text-xs text-gray-500 mt-0.5 truncate">{email}</p>
         {isAdmin && (

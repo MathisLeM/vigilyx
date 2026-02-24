@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 
@@ -47,7 +48,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <img src="/vigilyx_logo.png" alt="Vigilyx" className="h-10 w-auto mx-auto mb-4" />
+          <Image src="/vigilyx_logo.png" alt="Vigilyx" width={160} height={40} className="h-10 w-auto mx-auto mb-4" />
           <p className="text-gray-400 mt-1 text-sm">AI revenue monitoring for Stripe</p>
         </div>
 

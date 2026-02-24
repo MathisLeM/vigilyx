@@ -453,6 +453,11 @@ export interface Invitation {
   accepted_at: string | null;
 }
 
+// Returned only at creation time — includes token so the inviter can copy the link
+export interface InvitationCreated extends Invitation {
+  token: string;
+}
+
 export interface AcceptTokenInfo {
   valid: boolean;
   email: string;
@@ -471,8 +476,8 @@ export function listInvitations(tenantId: number): Promise<Invitation[]> {
   return request<Invitation[]>(`/invitations/${tenantId}`);
 }
 
-export function createInvitation(tenantId: number, email: string): Promise<Invitation> {
-  return request<Invitation>(`/invitations/${tenantId}`, {
+export function createInvitation(tenantId: number, email: string): Promise<InvitationCreated> {
+  return request<InvitationCreated>(`/invitations/${tenantId}`, {
     method: "POST",
     body: JSON.stringify({ email }),
   });

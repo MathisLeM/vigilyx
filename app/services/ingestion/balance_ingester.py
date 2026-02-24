@@ -36,11 +36,7 @@ from app.models.raw_balance_transaction import RawBalanceTransaction
 from app.models.stripe_connection import StripeConnection
 from app.services.crypto import decrypt_key
 from app.services.ingestion.feature_builder import FeatureBuildResult, build_daily_features
-from app.services.ingestion.stripe_client import (
-    StripeAuthError,
-    StripeClientError,
-    stream_balance_transactions,
-)
+from app.services.ingestion.stripe_client import stream_balance_transactions
 from data_contracts.stripe_schemas import StripeBalanceTransaction
 
 logger = logging.getLogger(__name__)

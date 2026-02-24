@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import LandingNav from "@/components/LandingNav";
 
 const FEATURES = [
@@ -311,7 +312,7 @@ export default function LandingPage() {
       <footer className="border-t border-gray-800/60 py-8 px-6">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 text-sm text-gray-600">
-            <img src="/vigilyx_logo.png" alt="Vigilyx" className="h-5 w-auto opacity-50" />
+            <Image src="/vigilyx_logo.png" alt="Vigilyx" width={80} height={20} className="h-5 w-auto opacity-50" />
             <span>— AI revenue monitoring for Stripe</span>
           </div>
           <div className="flex items-center gap-6 text-xs text-gray-600">

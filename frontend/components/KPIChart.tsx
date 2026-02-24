@@ -1,14 +1,11 @@
 "use client";
 
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,
   Tooltip,
   ResponsiveContainer,
-  ScatterChart,
-  Scatter,
   CartesianGrid,
   ComposedChart,
 } from "recharts";
@@ -42,6 +39,17 @@ interface ChartPoint {
   anomaly?: number;
 }
 
+function CustomDot(props: { cx?: number; cy?: number; payload?: ChartPoint }) {
+  const { cx, cy, payload } = props;
+  if (payload?.anomaly === undefined || cx === undefined || cy === undefined) return null;
+  return (
+    <g>
+      <line x1={cx - 7} y1={cy - 7} x2={cx + 7} y2={cy + 7} stroke="#ef4444" strokeWidth={2.5} />
+      <line x1={cx + 7} y1={cy - 7} x2={cx - 7} y2={cy + 7} stroke="#ef4444" strokeWidth={2.5} />
+    </g>
+  );
+}
+
 export default function KPIChart({ snapshots, alerts, selectedMetric, onMetricChange }: Props) {
 
   const metricLabel =
@@ -70,17 +78,6 @@ export default function KPIChart({ snapshots, alerts, selectedMetric, onMetricCh
   const formatDate = (d: string) => {
     try { return format(parseISO(d), "MMM d"); }
     catch { return d; }
-  };
-
-  const CustomDot = (props: { cx?: number; cy?: number; payload?: ChartPoint }) => {
-    const { cx, cy, payload } = props;
-    if (payload?.anomaly === undefined || cx === undefined || cy === undefined) return null;
-    return (
-      <g>
-        <line x1={cx - 7} y1={cy - 7} x2={cx + 7} y2={cy + 7} stroke="#ef4444" strokeWidth={2.5} />
-        <line x1={cx + 7} y1={cy - 7} x2={cx - 7} y2={cy + 7} stroke="#ef4444" strokeWidth={2.5} />
-      </g>
-    );
   };
 
   return (

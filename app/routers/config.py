@@ -573,7 +573,7 @@ def save_email_config(
     if email_changed:
         try:
             send_verification_email(cfg.alert_email, token, tenant.name)
-        except Exception as exc:
+        except Exception:
             # Don't fail the save — user can resend manually
             pass
 
