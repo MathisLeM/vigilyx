@@ -6,8 +6,17 @@ import { AuthProvider } from "@/lib/auth";
 const geist = Geist({ variable: "--font-geist", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Vigilyx",
-  description: "Anomaly detection · Root-cause hints · Multi-tenant",
+  title: "Vigilyx — AI Revenue Monitoring for Stripe",
+  description:
+    "Proactive anomaly detection for Stripe revenue. Catch drops, spikes, and refund surges before they become problems.",
+  metadataBase: new URL("https://www.vigilyx.io"),
+  alternates: {
+    canonical: "/",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({
