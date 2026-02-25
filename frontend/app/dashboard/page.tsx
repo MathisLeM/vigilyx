@@ -49,6 +49,7 @@ export default function DashboardPage() {
   const [detectionMsg, setDetectionMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   // Retry counter: auto-refetch when snapshots are empty (demo seeder still running after signup)
   const [seedingRetry, setSeedingRetry] = useState(0);
   const SEEDING_MAX_RETRIES = 5;
@@ -162,7 +163,21 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen">
-      <NavSidebar>
+      {/* Mobile top bar */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-30 bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center gap-3">
+        <button
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Open menu"
+          className="text-gray-400 hover:text-white transition-colors"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <span className="text-sm font-semibold text-white">Dashboard</span>
+      </div>
+
+      <NavSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)}>
         {/* Admin tenant selector */}
         {isAdmin && tenants.length > 0 && (
           <div>
@@ -259,7 +274,7 @@ export default function DashboardPage() {
       </NavSidebar>
 
       {/* ── Main content ── */}
-      <main className="flex-1 overflow-auto p-8 space-y-8">
+      <main className="flex-1 overflow-auto p-8 pt-20 md:pt-8 space-y-8">
         {/* Admin context header */}
         {isAdmin && activeTenantName && (
           <div className="flex items-center gap-2">

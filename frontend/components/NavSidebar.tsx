@@ -7,9 +7,11 @@ import { useAuth } from "@/lib/auth";
 
 interface Props {
   children?: React.ReactNode; // page-specific controls injected between nav and disconnect
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export default function NavSidebar({ children }: Props) {
+export default function NavSidebar({ children, isOpen = false, onClose }: Props) {
   const { email, isAdmin, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -20,56 +22,83 @@ export default function NavSidebar({ children }: Props) {
   ];
 
   return (
-    <aside className="w-64 shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col p-5 sticky top-0 h-screen overflow-y-auto">
-      {/* Logo + user */}
-      <div className="mb-6">
-        <Link href="/" className="flex items-center justify-center">
-          <Image src="/vigilyx_logo.png" alt="Vigilyx" width={200} height={60} className="w-full h-auto" />
-        </Link>
-        <p className="text-xs text-gray-500 mt-0.5 truncate">{email}</p>
-        {isAdmin && (
-          <span className="mt-1.5 inline-block text-xs font-semibold px-2 py-0.5 rounded-full
-                           bg-indigo-950 text-indigo-400 border border-indigo-800">
-            Admin
-          </span>
-        )}
-      </div>
+    <>
+      {/* Mobile backdrop */}
+      {isOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+          onClick={onClose}
+        />
+      )}
 
-      {/* Navigation */}
-      <nav className="flex flex-col gap-1 mb-5">
-        {navItems.map(({ href, label }) => {
-          const active = pathname === href;
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`text-sm px-3 py-2 rounded-lg transition-colors ${
-                active
-                  ? "bg-indigo-950 text-indigo-300 font-medium border border-indigo-800"
-                  : "text-gray-400 hover:text-white hover:bg-gray-800"
-              }`}
-            >
-              {label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className="border-t border-gray-800 mb-5" />
-
-      {/* Page-specific controls */}
-      {children && <div className="flex-1 space-y-4">{children}</div>}
-      {!children && <div className="flex-1" />}
-
-      {/* Disconnect */}
-      <button
-        onClick={async () => { await logout(); router.push("/login"); }}
-        className="w-full mt-4 rounded-lg border border-red-800 bg-transparent hover:bg-red-950
-                   text-red-400 hover:text-red-300 text-sm font-medium px-4 py-2.5
-                   transition-colors"
+      <aside
+        className={`
+          w-64 shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col p-5 overflow-y-auto
+          fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out
+          ${isOpen ? "translate-x-0" : "-translate-x-full"}
+          md:relative md:translate-x-0 md:sticky md:top-0 md:h-screen
+        `}
       >
-        Disconnect
-      </button>
-    </aside>
+        {/* Mobile close button */}
+        <button
+          className="md:hidden absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+          onClick={onClose}
+          aria-label="Close menu"
+        >
+          ✕
+        </button>
+
+        {/* Logo + user */}
+        <div className="mb-6">
+          <Link href="/" className="flex items-center justify-center">
+            <Image src="/vigilyx_logo.png" alt="Vigilyx" width={200} height={60} className="w-full h-auto" />
+          </Link>
+          <p className="text-xs text-gray-500 mt-0.5 truncate">{email}</p>
+          {isAdmin && (
+            <span className="mt-1.5 inline-block text-xs font-semibold px-2 py-0.5 rounded-full
+                             bg-indigo-950 text-indigo-400 border border-indigo-800">
+              Admin
+            </span>
+          )}
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex flex-col gap-1 mb-5">
+          {navItems.map(({ href, label }) => {
+            const active = pathname === href;
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`text-sm px-3 py-2 rounded-lg transition-colors ${
+                  active
+                    ? "bg-indigo-950 text-indigo-300 font-medium border border-indigo-800"
+                    : "text-gray-400 hover:text-white hover:bg-gray-800"
+                }`}
+                onClick={onClose}
+              >
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="border-t border-gray-800 mb-5" />
+
+        {/* Page-specific controls */}
+        {children && <div className="flex-1 space-y-4">{children}</div>}
+        {!children && <div className="flex-1" />}
+
+        {/* Disconnect */}
+        <button
+          onClick={async () => { await logout(); router.push("/login"); }}
+          className="w-full mt-4 rounded-lg border border-red-800 bg-transparent hover:bg-red-950
+                     text-red-400 hover:text-red-300 text-sm font-medium px-4 py-2.5
+                     transition-colors"
+        >
+          Disconnect
+        </button>
+      </aside>
+    </>
   );
 }

@@ -356,6 +356,8 @@ export default function ProfilePage() {
     finally { setRevokingId(null); }
   }
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   if (!isAuthenticated) return null;
 
   return (
@@ -367,9 +369,24 @@ export default function ProfilePage() {
           setEmailConfig={setEmailConfig}
         />
       </Suspense>
-      <NavSidebar />
 
-      <main className="flex-1 overflow-auto p-8 space-y-8">
+      {/* Mobile top bar */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-30 bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center gap-3">
+        <button
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Open menu"
+          className="text-gray-400 hover:text-white transition-colors"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <span className="text-sm font-semibold text-white">Profile & Settings</span>
+      </div>
+
+      <NavSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+      <main className="flex-1 overflow-auto p-8 pt-20 md:pt-8 space-y-8">
         <h1 className="text-2xl font-bold text-white">Profile & Settings</h1>
 
         {/* ── Section 1: Account Info ── */}
