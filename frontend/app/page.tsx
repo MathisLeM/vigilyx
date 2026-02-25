@@ -68,9 +68,25 @@ const STEPS = [
   },
 ];
 
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Vigilyx",
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web",
+  description:
+    "Proactive anomaly detection for Stripe revenue. Catch drops, spikes, and refund surges before they become problems.",
+  url: "https://www.vigilyx.io",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+};
+
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <LandingNav />
 
       {/* ── Hero ── */}
