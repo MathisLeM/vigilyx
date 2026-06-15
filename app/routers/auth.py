@@ -95,12 +95,17 @@ def create_access_token(data: dict) -> str:
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
+    # In production the frontend (Vercel) and backend (Railway) live on different
+    # domains, so every API call is cross-site. SameSite=Lax would stop the browser
+    # from sending the cookie on those cross-site XHR/fetch requests → 401. Use
+    # SameSite=None; Secure in prod (both ends are HTTPS). In local dev keep Lax so
+    # the cookie is still stored over plain HTTP (None requires Secure).
     response.set_cookie(
         key="access_token",
         value=token,
         httponly=True,
         secure=settings.is_production,   # HTTPS-only in prod, HTTP allowed in dev
-        samesite="lax",
+        samesite="none" if settings.is_production else "lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
@@ -203,7 +208,13 @@ def login(
 
 @router.post("/logout", status_code=204)
 def logout(response: Response):
-    response.delete_cookie("access_token", samesite="lax")
+    # Attributes must match those used when the cookie was set, otherwise the
+    # browser won't clear it (see _set_auth_cookie).
+    response.delete_cookie(
+        "access_token",
+        samesite="none" if settings.is_production else "lax",
+        secure=settings.is_production,
+    )
 
 
 @router.get("/me", response_model=UserOut)
